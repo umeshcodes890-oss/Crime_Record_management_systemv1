@@ -16,7 +16,7 @@ USE crime_records;
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS case_sequences (
     yr         INT      NOT NULL,
-    last_value INT      NOT NULL DEFAULT 0,
+    last_seq   INT      NOT NULL DEFAULT 0,
     PRIMARY KEY (yr)
 ) ENGINE = InnoDB;
 
@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS officers (
     officer_id  INT          NOT NULL AUTO_INCREMENT,
     badge_no    VARCHAR(20)  NOT NULL,
     name        VARCHAR(120) NOT NULL,
-    rank        VARCHAR(40)  NOT NULL,
+    -- RANK is reserved in MySQL 8.0, so it always needs backticks.
+    `rank`      VARCHAR(40)  NOT NULL,
     station_id  INT          NOT NULL,
     phone       VARCHAR(20)  NULL,
     join_date   DATE         NULL,
@@ -164,8 +165,11 @@ CREATE TABLE IF NOT EXISTS crime_cases (
         ON UPDATE CASCADE ON DELETE RESTRICT,
     CONSTRAINT chk_case_dates CHECK (occurrence_datetime <= reporting_datetime),
     CONSTRAINT chk_case_closed CHECK (
-        status IN ('closed_convicted','closed_acquitted','closed_untraceable')
-        OR closed_datetime IS NULL
+        (status IN ('closed_convicted','closed_acquitted','closed_untraceable')
+            AND closed_datetime IS NOT NULL)
+        OR
+        (status NOT IN ('closed_convicted','closed_acquitted','closed_untraceable')
+            AND closed_datetime IS NULL)
     )
 ) ENGINE = InnoDB;
 

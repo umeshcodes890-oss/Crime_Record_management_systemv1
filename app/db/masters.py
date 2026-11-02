@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
-
+from app.db.auth import ROLE_ADMIN, Repository
 from app.db.connection import Database
 
 
-class StationRepository:
-    def __init__(self, db: Database) -> None:
-        self.db = db
+class StationRepository(Repository):
+    write_roles = (ROLE_ADMIN,)
+
+    def __init__(self, db: Database, actor: dict | None = None) -> None:
+        super().__init__(db, actor)
 
     def list_all(self) -> list[dict]:
         return self.db.query(
@@ -36,7 +37,7 @@ class StationRepository:
 
     def create(self, name: str, district: str, address: str | None,
                phone: str | None, incharge_officer_id: int | None = None) -> int:
-        return self.db.execute(
+        return self.execute(
             """
             INSERT INTO police_stations (name, district, address, phone, incharge_officer_id)
             VALUES (%s, %s, %s, %s, %s)
@@ -47,7 +48,7 @@ class StationRepository:
     def update(self, station_id: int, name: str, district: str,
                address: str | None, phone: str | None,
                incharge_officer_id: int | None) -> None:
-        self.db.execute(
+        self.execute(
             """
             UPDATE police_stations
                SET name = %s, district = %s, address = %s, phone = %s,
@@ -58,12 +59,14 @@ class StationRepository:
         )
 
     def delete(self, station_id: int) -> None:
-        self.db.execute("DELETE FROM police_stations WHERE station_id = %s", (station_id,))
+        self.execute("DELETE FROM police_stations WHERE station_id = %s", (station_id,))
 
 
-class OfficerRepository:
-    def __init__(self, db: Database) -> None:
-        self.db = db
+class OfficerRepository(Repository):
+    write_roles = (ROLE_ADMIN,)
+
+    def __init__(self, db: Database, actor: dict | None = None) -> None:
+        super().__init__(db, actor)
 
     def list_all(self) -> list[dict]:
         return self.db.query(
@@ -74,7 +77,7 @@ class OfficerRepository:
         if station_id:
             return self.db.query(
                 """
-                SELECT officer_id, name, badge_no, rank, station_id
+                SELECT officer_id, name, badge_no, `rank`, station_id
                 FROM officers WHERE is_active = TRUE AND station_id = %s
                 ORDER BY name
                 """,
@@ -82,7 +85,7 @@ class OfficerRepository:
             )
         return self.db.query(
             """
-            SELECT officer_id, name, badge_no, rank, station_id
+            SELECT officer_id, name, badge_no, `rank`, station_id
             FROM officers WHERE is_active = TRUE ORDER BY name
             """
         )
@@ -100,9 +103,9 @@ class OfficerRepository:
 
     def create(self, badge_no: str, name: str, rank: str, station_id: int,
                phone: str | None, join_date: str | None) -> int:
-        return self.db.execute(
+        return self.execute(
             """
-            INSERT INTO officers (badge_no, name, rank, station_id, phone, join_date)
+            INSERT INTO officers (badge_no, name, `rank`, station_id, phone, join_date)
             VALUES (%s, %s, %s, %s, %s, %s)
             """,
             (badge_no.strip(), name.strip(), rank, station_id, phone, join_date),
@@ -111,10 +114,10 @@ class OfficerRepository:
     def update(self, officer_id: int, badge_no: str, name: str, rank: str,
                station_id: int, phone: str | None, join_date: str | None,
                is_active: bool) -> None:
-        self.db.execute(
+        self.execute(
             """
             UPDATE officers
-               SET badge_no = %s, name = %s, rank = %s, station_id = %s,
+               SET badge_no = %s, name = %s, `rank` = %s, station_id = %s,
                    phone = %s, join_date = %s, is_active = %s
              WHERE officer_id = %s
             """,
@@ -123,12 +126,14 @@ class OfficerRepository:
         )
 
     def delete(self, officer_id: int) -> None:
-        self.db.execute("DELETE FROM officers WHERE officer_id = %s", (officer_id,))
+        self.execute("DELETE FROM officers WHERE officer_id = %s", (officer_id,))
 
 
-class OffenceRepository:
-    def __init__(self, db: Database) -> None:
-        self.db = db
+class OffenceRepository(Repository):
+    write_roles = (ROLE_ADMIN,)
+
+    def __init__(self, db: Database, actor: dict | None = None) -> None:
+        super().__init__(db, actor)
 
     def list_all(self, law_code: str | None = None) -> list[dict]:
         if law_code:
@@ -169,7 +174,7 @@ class OffenceRepository:
                category: str, severity: str, min_years: float | None,
                max_years: float | None, fine_cap: float | None,
                description: str | None) -> int:
-        return self.db.execute(
+        return self.execute(
             """
             INSERT INTO offence_sections
                 (law_code, section_no, offence_name, category, severity,
@@ -184,7 +189,7 @@ class OffenceRepository:
                offence_name: str, category: str, severity: str,
                min_years: float | None, max_years: float | None,
                fine_cap: float | None, description: str | None) -> None:
-        self.db.execute(
+        self.execute(
             """
             UPDATE offence_sections
                SET law_code = %s, section_no = %s, offence_name = %s,
@@ -197,4 +202,4 @@ class OffenceRepository:
         )
 
     def delete(self, section_id: int) -> None:
-        self.db.execute("DELETE FROM offence_sections WHERE section_id = %s", (section_id,))
+        self.execute("DELETE FROM offence_sections WHERE section_id = %s", (section_id,))

@@ -18,11 +18,11 @@ BEGIN
 
     SET v_year = YEAR(COALESCE(NEW.occurrence_datetime, NOW()));
 
-    INSERT INTO case_sequences (yr, last_value)
+    INSERT INTO case_sequences (yr, last_seq)
     VALUES (v_year, 1)
-    ON DUPLICATE KEY UPDATE last_value = last_value + 1;
+    ON DUPLICATE KEY UPDATE last_seq = last_seq + 1;
 
-    SELECT last_value INTO v_seq FROM case_sequences WHERE yr = v_year;
+    SELECT last_seq INTO v_seq FROM case_sequences WHERE yr = v_year;
 
     SET NEW.case_no = CONCAT('CR/', v_year, '/', LPAD(v_seq, 4, '0'));
 END $$

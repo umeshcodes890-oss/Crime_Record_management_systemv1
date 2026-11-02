@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from app.db.auth import Repository
 from app.db.connection import Database
 
 
-class ReportRepository:
-    def __init__(self, db: Database) -> None:
-        self.db = db
+class ReportRepository(Repository):
+    def __init__(self, db: Database, actor: dict | None = None) -> None:
+        super().__init__(db, actor)
 
     def summary(self) -> dict:
         rows = self.db.call("sp_dashboard_summary")

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from app.db.auth import Repository
 from app.db.connection import Database
 
 
-class EvidenceRepository:
-    def __init__(self, db: Database) -> None:
-        self.db = db
+class EvidenceRepository(Repository):
+    def __init__(self, db: Database, actor: dict | None = None) -> None:
+        super().__init__(db, actor)
 
     def for_case(self, case_id: int) -> list[dict]:
         return self.db.query(
@@ -48,7 +49,7 @@ class EvidenceRepository:
                collected_by_officer_id: int, collected_datetime: str,
                seized_under: str | None = None, storage_location: str | None = None,
                chain_of_custody_datetime: str | None = None) -> int:
-        return self.db.execute(
+        return self.execute(
             """
             INSERT INTO evidence (case_id, type, description, collected_by_officer_id,
                                   collected_datetime, seized_under, storage_location,
@@ -70,7 +71,7 @@ class EvidenceRepository:
         if not sets:
             return
         values.append(evidence_id)
-        self.db.execute(f"UPDATE evidence SET {', '.join(sets)} WHERE evidence_id = %s", values)
+        self.execute(f"UPDATE evidence SET {', '.join(sets)} WHERE evidence_id = %s", values)
 
     def delete(self, evidence_id: int) -> None:
-        self.db.execute("DELETE FROM evidence WHERE evidence_id = %s", (evidence_id,))
+        self.execute("DELETE FROM evidence WHERE evidence_id = %s", (evidence_id,))

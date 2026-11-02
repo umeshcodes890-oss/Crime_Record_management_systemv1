@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from app.db.auth import Repository
 from app.db.connection import Database
 
 
-class SuspectRepository:
-    def __init__(self, db: Database) -> None:
-        self.db = db
+class SuspectRepository(Repository):
+    def __init__(self, db: Database, actor: dict | None = None) -> None:
+        super().__init__(db, actor)
 
     def for_case(self, case_id: int) -> list[dict]:
         return self.db.query(
@@ -27,7 +28,12 @@ class SuspectRepository:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         return self.db.query(
             f"""
-            SELECT s.*, c.case_no, c.status AS case_status, c.category AS case_category
+            SELECT s.*, c.case_no, c.status AS case_status, c.category AS case_category,
+                   (SELECT COUNT(*) FROM arrests a WHERE a.suspect_id = s.suspect_id)
+                       AS arrest_count,
+                   (SELECT COALESCE(SUM(cv.imprisonment_years), 0)
+                      FROM convictions cv WHERE cv.suspect_id = s.suspect_id)
+                       AS total_sentence_years
             FROM suspects s
             JOIN crime_cases c ON c.case_id = s.case_id
             {where}
@@ -45,7 +51,7 @@ class SuspectRepository:
                date_of_birth: str | None = None, gender: str = "unknown",
                address: str | None = None, phone: str | None = None,
                identifying_marks: str | None = None, status: str = "wanted") -> int:
-        return self.db.execute(
+        return self.execute(
             """
             INSERT INTO suspects (case_id, name, alias, date_of_birth, gender,
                                   address, phone, identifying_marks, status)
@@ -66,15 +72,15 @@ class SuspectRepository:
         if not sets:
             return
         values.append(suspect_id)
-        self.db.execute(f"UPDATE suspects SET {', '.join(sets)} WHERE suspect_id = %s", values)
+        self.execute(f"UPDATE suspects SET {', '.join(sets)} WHERE suspect_id = %s", values)
 
     def delete(self, suspect_id: int) -> None:
-        self.db.execute("DELETE FROM suspects WHERE suspect_id = %s", (suspect_id,))
+        self.execute("DELETE FROM suspects WHERE suspect_id = %s", (suspect_id,))
 
 
-class VictimRepository:
-    def __init__(self, db: Database) -> None:
-        self.db = db
+class VictimRepository(Repository):
+    def __init__(self, db: Database, actor: dict | None = None) -> None:
+        super().__init__(db, actor)
 
     def for_case(self, case_id: int) -> list[dict]:
         return self.db.query(
@@ -99,7 +105,7 @@ class VictimRepository:
                gender: str = "unknown", phone: str | None = None,
                address: str | None = None, injury_level: str = "none",
                statement: str | None = None) -> int:
-        return self.db.execute(
+        return self.execute(
             """
             INSERT INTO victims (case_id, name, age, gender, phone, address,
                                  injury_level, statement)
@@ -118,15 +124,15 @@ class VictimRepository:
         if not sets:
             return
         values.append(victim_id)
-        self.db.execute(f"UPDATE victims SET {', '.join(sets)} WHERE victim_id = %s", values)
+        self.execute(f"UPDATE victims SET {', '.join(sets)} WHERE victim_id = %s", values)
 
     def delete(self, victim_id: int) -> None:
-        self.db.execute("DELETE FROM victims WHERE victim_id = %s", (victim_id,))
+        self.execute("DELETE FROM victims WHERE victim_id = %s", (victim_id,))
 
 
-class WitnessRepository:
-    def __init__(self, db: Database) -> None:
-        self.db = db
+class WitnessRepository(Repository):
+    def __init__(self, db: Database, actor: dict | None = None) -> None:
+        super().__init__(db, actor)
 
     def for_case(self, case_id: int) -> list[dict]:
         return self.db.query(
@@ -150,7 +156,7 @@ class WitnessRepository:
     def create(self, case_id: int, name: str, *, phone: str | None = None,
                address: str | None = None, statement: str | None = None,
                is_reliable: bool = True) -> int:
-        return self.db.execute(
+        return self.execute(
             """
             INSERT INTO witnesses (case_id, name, phone, address, statement, is_reliable)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -168,7 +174,7 @@ class WitnessRepository:
         if not sets:
             return
         values.append(witness_id)
-        self.db.execute(f"UPDATE witnesses SET {', '.join(sets)} WHERE witness_id = %s", values)
+        self.execute(f"UPDATE witnesses SET {', '.join(sets)} WHERE witness_id = %s", values)
 
     def delete(self, witness_id: int) -> None:
-        self.db.execute("DELETE FROM witnesses WHERE witness_id = %s", (witness_id,))
+        self.execute("DELETE FROM witnesses WHERE witness_id = %s", (witness_id,))

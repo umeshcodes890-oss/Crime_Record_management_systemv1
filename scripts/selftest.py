@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.db.connection import Database, DatabaseError  # noqa: E402
+from app.db.passwords import hash_password, verify_password  # noqa: E402
 from app.db.repositories import Repositories  # noqa: E402
 
 EXPECTED_TABLES = [
@@ -89,9 +90,45 @@ def check_schema(db: Database) -> None:
         check(f"trigger {name}", name in triggers)
 
 
-def check_behaviour(db: Database) -> None:
+def check_login(db: Database, actor: dict) -> None:
+    print("Login")
+    digest = hash_password("selftest-pass")
+    check("a password verifies against its own hash",
+          verify_password("selftest-pass", digest))
+    check("a wrong password fails the hash check",
+          not verify_password("something-else", digest))
+
+    repos = Repositories(db, actor)
+    username = "selftest_user"
+
+    leftover = db.query_one(
+        "SELECT user_id FROM users WHERE username = %s", (username,)
+    )
+    if leftover:
+        db.execute("DELETE FROM users WHERE user_id = %s", (leftover["user_id"],))
+
+    user_id = repos.users.create(username, "selftest-pass", "viewer")
+    try:
+        signed_in = repos.users.authenticate(username, "selftest-pass")
+        check("a new account can sign in",
+              signed_in is not None and signed_in["username"] == username)
+        check("a wrong password is refused",
+              repos.users.authenticate(username, "wrong-password") is None)
+        check("an unknown account is refused",
+              repos.users.authenticate("no-such-user", "selftest-pass") is None)
+    finally:
+        repos.users.delete(user_id)
+
+
+def check_behaviour(db: Database, actor: dict) -> None:
     print("Behaviour")
-    repos = Repositories(db)
+    admin_row = next(
+        (u for u in Repositories(db).users.list_all() if u["role"] == "admin"), None
+    )
+    if admin_row is None:
+        check("an admin account exists", False, "run py scripts\\setup_db.py first")
+        return
+    repos = Repositories(db, actor)
 
     stations = repos.stations.list_all()
     officers = repos.officers.options()
@@ -105,7 +142,7 @@ def check_behaviour(db: Database) -> None:
     officer = next((o for o in officers if o["station_id"] == station["station_id"]),
                     officers[0])
     section_ids = [sections[0]["section_id"], sections[1]["section_id"]]
-    admin = repos.users.list_all()[0]
+    admin = admin_row
 
     filed = repos.cases.file_case(
         station_id=station["station_id"],
@@ -173,7 +210,23 @@ def check_behaviour(db: Database) -> None:
         restricted = True
     check("deleting a station with cases is refused", restricted)
 
-    db.execute("DELETE FROM crime_cases WHERE case_id = %s", (case_id,))
+    viewer_refused = False
+    try:
+        Repositories(db, {"user_id": admin["user_id"], "role": "viewer"}).suspects.create(
+            case_id, "Viewer should not write", status="wanted")
+    except DatabaseError:
+        viewer_refused = True
+    check("a viewer cannot write", viewer_refused)
+
+    officer_refused = False
+    try:
+        Repositories(db, {"user_id": admin["user_id"], "role": "officer"}).stations.create(
+            "Self test station", "Self test district", None, None, None)
+    except DatabaseError:
+        officer_refused = True
+    check("an officer cannot edit master data", officer_refused)
+
+    repos.cases.delete(case_id)
     leftovers = db.query(
         """
         SELECT
@@ -193,7 +246,19 @@ def main() -> int:
     print(f"Testing {db.config['database'].get('database')}\n")
     try:
         check_schema(db)
-        check_behaviour(db)
+        admin_row = next(
+            (u for u in Repositories(db).users.list_all() if u["role"] == "admin"), None
+        )
+        if admin_row is None:
+            check("an admin account exists", False, "run py scripts\\setup_db.py first")
+        else:
+            actor = {
+                "user_id": admin_row["user_id"],
+                "username": admin_row["username"],
+                "role": "admin",
+            }
+            check_login(db, actor)
+            check_behaviour(db, actor)
     finally:
         db.close()
 

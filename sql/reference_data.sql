@@ -1,6 +1,6 @@
 -- =====================================================================
 -- Reference data
--- Stations and the law library.
+-- Stations, one officer per station, and the law library.
 -- The offence rows ship with the Indian Penal Code (IPC, 1860)
 -- numbering, which is stable and verifiable. BNS 2023 rows can be
 -- added from the Offence Sections screen - the schema supports both
@@ -16,6 +16,23 @@ INSERT IGNORE INTO police_stations (name, district, address, phone) VALUES
     ('Cyber Crime Police Station',     'Central', 'IT Hub, Raidurgam, Central District',  '040-27006606'),
     ('Traffic Police Station',         'Central', 'Sardar Patel Road, Central District', '040-27007707'),
     ('Women & Child Protection Cell',  'South',   'Madhapur, South District',            '040-27008808');
+
+-- One officer per station so the officer pickers and the station in-charge
+-- field have something to offer from the first run.
+INSERT IGNORE INTO officers (badge_no, name, `rank`, station_id, phone, join_date)
+SELECT t.badge_no, t.name, t.officer_rank, s.station_id, t.phone, '2020-06-01'
+FROM (
+    SELECT 'HYD-001' AS badge_no, 'Anil Verma'   AS name, 'Sub-Inspector' AS officer_rank,
+           '040-27001101' AS phone, 'Central Police Station' AS station
+    UNION ALL SELECT 'HYD-002', 'Bhavna Iyer',   'Inspector',     '040-27002202', 'North Police Station'
+    UNION ALL SELECT 'HYD-003', 'Ravi Shankar', 'Sub-Inspector', '040-27003303', 'South Police Station'
+    UNION ALL SELECT 'HYD-004', 'Meera Nair',    'Inspector',     '040-27004404', 'East Police Station'
+    UNION ALL SELECT 'HYD-005', 'Suresh Kumar',  'Constable',     '040-27005505', 'West Police Station'
+    UNION ALL SELECT 'HYD-006', 'Nisha Menon',   'Inspector',     '040-27006606', 'Cyber Crime Police Station'
+    UNION ALL SELECT 'HYD-007', 'Prakash Rao',   'Sub-Inspector', '040-27007707', 'Traffic Police Station'
+    UNION ALL SELECT 'HYD-008', 'Asha Qureshi',  'Inspector',     '040-27008808', 'Women & Child Protection Cell'
+) t
+JOIN police_stations s ON s.name = t.station;
 
 INSERT IGNORE INTO offence_sections
     (law_code, section_no, offence_name, category, severity,

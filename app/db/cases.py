@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.db.auth import ROLE_ADMIN, Repository
 from app.db.connection import Database, DatabaseError
 
 
-class CaseRepository:
-    def __init__(self, db: Database) -> None:
-        self.db = db
+class CaseRepository(Repository):
+    def __init__(self, db: Database, actor: dict | None = None) -> None:
+        super().__init__(db, actor)
 
     # -- reads --------------------------------------------------------
     def search(
@@ -94,7 +95,7 @@ class CaseRepository:
         description: str | None,
         section_ids: list[int],
     ) -> dict:
-        rows = self.db.call(
+        rows = self.call(
             "sp_file_case",
             [
                 station_id, officer_id, user_id, category, offence_type,
@@ -108,7 +109,7 @@ class CaseRepository:
 
     def update_status(self, case_id: int, new_status: str, user_id: int,
                       remark: str | None = None) -> dict:
-        rows = self.db.call(
+        rows = self.call(
             "sp_update_case_status", [case_id, new_status, user_id, remark]
         )
         if not rows:
@@ -116,7 +117,7 @@ class CaseRepository:
         return rows[0]
 
     def assign_officer(self, case_id: int, officer_id: int, user_id: int) -> dict:
-        rows = self.db.call(
+        rows = self.call(
             "sp_assign_officer", [case_id, officer_id, user_id]
         )
         if not rows:
@@ -137,13 +138,13 @@ class CaseRepository:
         if not sets:
             return
         values.append(case_id)
-        self.db.execute(
+        self.execute(
             f"UPDATE crime_cases SET {', '.join(sets)} WHERE case_id = %s", values
         )
 
     def add_offence(self, case_id: int, section_id: int,
                     accused_role: str = "primary") -> None:
-        self.db.execute(
+        self.execute(
             """
             INSERT INTO case_offences (case_id, section_id, accused_role)
             VALUES (%s, %s, %s)
@@ -153,10 +154,11 @@ class CaseRepository:
         )
 
     def remove_offence(self, case_id: int, section_id: int) -> None:
-        self.db.execute(
+        self.execute(
             "DELETE FROM case_offences WHERE case_id = %s AND section_id = %s",
             (case_id, section_id),
         )
 
     def delete(self, case_id: int) -> None:
-        self.db.execute("DELETE FROM crime_cases WHERE case_id = %s", (case_id,))
+        self.require(ROLE_ADMIN)
+        self.execute("DELETE FROM crime_cases WHERE case_id = %s", (case_id,))

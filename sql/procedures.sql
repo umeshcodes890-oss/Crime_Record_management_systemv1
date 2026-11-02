@@ -86,6 +86,8 @@ proc: BEGIN
         RESIGNAL;
     END;
 
+    START TRANSACTION;
+
     SELECT status INTO v_old_status FROM crime_cases WHERE case_id = p_case_id FOR UPDATE;
 
     IF v_old_status IS NULL THEN
@@ -210,6 +212,12 @@ CREATE PROCEDURE sp_search_cases(
     IN p_limit      INT
 )
 proc: BEGIN
+    DECLARE v_limit INT DEFAULT 500;
+
+    IF p_limit IS NOT NULL AND p_limit > 0 THEN
+        SET v_limit = p_limit;
+    END IF;
+
     SELECT *
     FROM v_case_overview v
     WHERE (p_case_no IS NULL OR v.case_no LIKE CONCAT('%', p_case_no, '%'))
@@ -228,7 +236,7 @@ proc: BEGIN
            OR v.offence_type       LIKE CONCAT('%', p_text, '%')
            OR v.offence_summary    LIKE CONCAT('%', p_text, '%'))
     ORDER BY v.occurrence_datetime DESC
-    LIMIT CASE WHEN p_limit IS NULL OR p_limit <= 0 THEN 500 ELSE p_limit END;
+    LIMIT v_limit;
 END $$
 
 -- ---------------------------------------------------------------------
@@ -340,22 +348,24 @@ END $$
 DROP PROCEDURE IF EXISTS sp_dashboard_summary $$
 CREATE PROCEDURE sp_dashboard_summary()
 proc: BEGIN
+    -- COALESCE keeps every counter at 0 rather than NULL on an empty
+    -- database, so the dashboard cards never show a blank.
     SELECT
         COUNT(*) AS total_cases,
-        SUM(CASE WHEN status IN ('registered','under_investigation','charges_filed','trial')
-                 THEN 1 ELSE 0 END) AS open_cases,
-        SUM(CASE WHEN status = 'closed_convicted'   THEN 1 ELSE 0 END) AS convicted_cases,
-        SUM(CASE WHEN status = 'closed_acquitted'   THEN 1 ELSE 0 END) AS acquitted_cases,
-        SUM(CASE WHEN status = 'closed_untraceable' THEN 1 ELSE 0 END) AS untraceable_cases,
-        SUM(CASE WHEN occurrence_datetime >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-                 THEN 1 ELSE 0 END) AS cases_last_30_days,
-        SUM(CASE WHEN closed_datetime >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-                 THEN 1 ELSE 0 END) AS closed_last_30_days,
-        ROUND(100.0 * SUM(CASE WHEN status = 'closed_convicted' THEN 1 ELSE 0 END)
-              / NULLIF(SUM(CASE WHEN status LIKE 'closed%' THEN 1 ELSE 0 END), 0), 1)
+        COALESCE(SUM(CASE WHEN status IN ('registered','under_investigation','charges_filed','trial')
+                 THEN 1 ELSE 0 END), 0) AS open_cases,
+        COALESCE(SUM(CASE WHEN status = 'closed_convicted'   THEN 1 ELSE 0 END), 0) AS convicted_cases,
+        COALESCE(SUM(CASE WHEN status = 'closed_acquitted'   THEN 1 ELSE 0 END), 0) AS acquitted_cases,
+        COALESCE(SUM(CASE WHEN status = 'closed_untraceable' THEN 1 ELSE 0 END), 0) AS untraceable_cases,
+        COALESCE(SUM(CASE WHEN occurrence_datetime >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                 THEN 1 ELSE 0 END), 0) AS cases_last_30_days,
+        COALESCE(SUM(CASE WHEN closed_datetime >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                 THEN 1 ELSE 0 END), 0) AS closed_last_30_days,
+        COALESCE(ROUND(100.0 * SUM(CASE WHEN status = 'closed_convicted' THEN 1 ELSE 0 END)
+              / NULLIF(SUM(CASE WHEN status LIKE 'closed%' THEN 1 ELSE 0 END), 0), 1), 0)
             AS clearance_rate,
-        ROUND(AVG(CASE WHEN closed_datetime IS NOT NULL
-                        THEN DATEDIFF(closed_datetime, occurrence_datetime) END), 1)
+        COALESCE(ROUND(AVG(CASE WHEN closed_datetime IS NOT NULL
+                        THEN DATEDIFF(closed_datetime, occurrence_datetime) END), 1), 0)
             AS avg_days_to_close,
         (SELECT COUNT(*) FROM suspects WHERE status = 'wanted')      AS wanted_suspects,
         (SELECT COUNT(*) FROM suspects WHERE status IN ('arrested','in_custody'))

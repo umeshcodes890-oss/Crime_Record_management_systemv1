@@ -49,7 +49,7 @@ SELECT
     o.officer_id,
     o.name,
     o.badge_no,
-    o.rank,
+    o.`rank`,
     o.is_active,
     ps.station_id,
     ps.name       AS station_name,
@@ -66,7 +66,7 @@ SELECT
 FROM officers o
 JOIN police_stations ps ON ps.station_id = o.station_id
 LEFT JOIN crime_cases c ON c.investigating_officer_id = o.officer_id
-GROUP BY o.officer_id, o.name, o.badge_no, o.rank, o.is_active,
+GROUP BY o.officer_id, o.name, o.badge_no, o.`rank`, o.is_active,
          ps.station_id, ps.name, ps.district;
 
 -- Per-station performance including a clearance rate.

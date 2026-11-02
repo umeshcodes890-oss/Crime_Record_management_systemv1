@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from app.db.auth import Repository
 from app.db.connection import Database
 
 
-class ArrestRepository:
-    def __init__(self, db: Database) -> None:
-        self.db = db
+class ArrestRepository(Repository):
+    def __init__(self, db: Database, actor: dict | None = None) -> None:
+        super().__init__(db, actor)
 
     def for_case(self, case_id: int) -> list[dict]:
         return self.db.query(
@@ -43,7 +44,7 @@ class ArrestRepository:
                arrest_datetime: str, place: str | None,
                remand_status: str = "not_remanded",
                bail_amount: float | None = None) -> int:
-        rows = self.db.call(
+        rows = self.call(
             "sp_record_arrest",
             [case_id, suspect_id, officer_id, arrest_datetime, place,
              remand_status, bail_amount],
@@ -51,12 +52,12 @@ class ArrestRepository:
         return int(rows[0]["arrest_id"]) if rows else 0
 
     def delete(self, arrest_id: int) -> None:
-        self.db.execute("DELETE FROM arrests WHERE arrest_id = %s", (arrest_id,))
+        self.execute("DELETE FROM arrests WHERE arrest_id = %s", (arrest_id,))
 
 
-class ProceedingRepository:
-    def __init__(self, db: Database) -> None:
-        self.db = db
+class ProceedingRepository(Repository):
+    def __init__(self, db: Database, actor: dict | None = None) -> None:
+        super().__init__(db, actor)
 
     def for_case(self, case_id: int) -> list[dict]:
         return self.db.query(
@@ -84,7 +85,7 @@ class ProceedingRepository:
                stage: str = "first_hearing", judge_name: str | None = None,
                next_hearing_datetime: str | None = None,
                remarks: str | None = None) -> int:
-        return self.db.execute(
+        return self.execute(
             """
             INSERT INTO court_proceedings (case_id, court_name, hearing_datetime, stage,
                                            judge_name, next_hearing_datetime, remarks)
@@ -105,19 +106,19 @@ class ProceedingRepository:
         if not sets:
             return
         values.append(proceeding_id)
-        self.db.execute(
+        self.execute(
             f"UPDATE court_proceedings SET {', '.join(sets)} WHERE proceeding_id = %s", values
         )
 
     def delete(self, proceeding_id: int) -> None:
-        self.db.execute(
+        self.execute(
             "DELETE FROM court_proceedings WHERE proceeding_id = %s", (proceeding_id,)
         )
 
 
-class ConvictionRepository:
-    def __init__(self, db: Database) -> None:
-        self.db = db
+class ConvictionRepository(Repository):
+    def __init__(self, db: Database, actor: dict | None = None) -> None:
+        super().__init__(db, actor)
 
     def for_case(self, case_id: int) -> list[dict]:
         return self.db.query(
@@ -152,7 +153,7 @@ class ConvictionRepository:
                fine_amount: float | None = None,
                sentence_start: str | None = None,
                release_expected: str | None = None) -> int:
-        rows = self.db.call(
+        rows = self.call(
             "sp_record_conviction",
             [case_id, suspect_id, user_id, court_name, verdict, sentence_type,
              imprisonment_years, fine_amount, sentence_start, release_expected],
@@ -160,4 +161,4 @@ class ConvictionRepository:
         return int(rows[0]["conviction_id"]) if rows else 0
 
     def delete(self, conviction_id: int) -> None:
-        self.db.execute("DELETE FROM convictions WHERE conviction_id = %s", (conviction_id,))
+        self.execute("DELETE FROM convictions WHERE conviction_id = %s", (conviction_id,))
