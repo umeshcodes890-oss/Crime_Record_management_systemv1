@@ -1,0 +1,20 @@
+# Credentials - never commit the real config
+config.ini
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Tooling
+.vscode/
+.idea/
+.mypy_cache/
+.pytest_cache/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store

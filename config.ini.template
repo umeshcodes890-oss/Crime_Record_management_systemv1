@@ -1,0 +1,14 @@
+; Copy this file to config.ini and fill in your MySQL details.
+; config.ini is git-ignored so your password never reaches the repo.
+
+[database]
+host = 127.0.0.1
+port = 3306
+user = root
+password = CHANGE_ME
+database = crime_records
+
+[app]
+theme = dark
+window_width = 1280
+window_height = 800
