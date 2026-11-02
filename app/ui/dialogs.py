@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
 import customtkinter as ctk
 
-from app.ui.theme import PAD, PAD_LG, RADIUS, fonts
+from app.ui.theme import PAD, PAD_LG, PAD_SM, RADIUS, fonts
 from app.ui.widgets import PALETTE, FormPanel
 
 

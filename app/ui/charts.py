@@ -75,18 +75,24 @@ def donut_chart(labels, values, title: str, colors=None,
     ax.title.set_color(c.TEXT)
 
     palette = colors or [c.ACCENT] * len(labels)
-    wedges, _ = ax.pie(
-        values, colors=palette, startangle=90, counterclock=False,
-        wedgeprops={"width": 0.42, "edgecolor": c.SURFACE, "linewidth": 2},
-    )
-    ax.text(0, 0.08, str(sum(values)), ha="center", va="center",
+    total = sum(values)
+    if total:
+        wedges, _ = ax.pie(
+            values, colors=palette, startangle=90, counterclock=False,
+            wedgeprops={"width": 0.42, "edgecolor": c.SURFACE, "linewidth": 2},
+        )
+        legend_labels = [f"{label}  {value}" for label, value in zip(labels, values)]
+        ax.legend(wedges, legend_labels, loc="center left", bbox_to_anchor=(1.0, 0.5),
+                  frameon=False, fontsize=9, labelcolor=c.TEXT_MUTED)
+    else:
+        # matplotlib refuses an all-zero pie, so draw an empty ring instead.
+        ax.pie([1], colors=[c.SURFACE_ALT], startangle=90, counterclock=False,
+               wedgeprops={"width": 0.42, "edgecolor": c.SURFACE, "linewidth": 2})
+
+    ax.text(0, 0.08, str(total), ha="center", va="center",
             fontsize=18, color=c.TEXT, fontweight="bold")
     ax.text(0, -0.16, "cases", ha="center", va="center", fontsize=9,
             color=c.TEXT_MUTED)
-
-    legend_labels = [f"{label}  {value}" for label, value in zip(labels, values)]
-    ax.legend(wedges, legend_labels, loc="center left", bbox_to_anchor=(1.0, 0.5),
-              frameon=False, fontsize=9, labelcolor=c.TEXT_MUTED)
     ax.set_title(title, fontsize=11, pad=12, loc="left")
     fig.tight_layout()
     return fig

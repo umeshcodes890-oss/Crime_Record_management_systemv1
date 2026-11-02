@@ -7,7 +7,7 @@ from typing import Any
 import customtkinter as ctk
 
 from app.ui.dialogs import FormDialog
-from app.ui.theme import PAD, PAD_LG, RADIUS, fonts
+from app.ui.theme import PAD, PAD_LG, PAD_SM, RADIUS, fonts
 from app.ui.views.base import BaseView
 from app.ui.widgets import PALETTE, Column, DataTable, FormPanel
 
@@ -86,8 +86,10 @@ class EvidenceView(BaseView):
             title="Evidence register",
             empty_text="No evidence has been recorded yet.",
             on_row_double=lambda row: self.app.navigate("cases", case_id=row["case_id"]),
+            on_delete=self._delete if self.can_write() else None,
         )
         self.table.grid(row=1, column=0, sticky="nsew", padx=PAD_LG, pady=(0, PAD_LG))
+        self.refresh()
 
     def refresh(self) -> None:
         evidence_type = self.type_filter.get()
@@ -99,3 +101,10 @@ class EvidenceView(BaseView):
             search=self.search.get().strip() or None,
         )
         self.table.set_rows(rows or [])
+
+    def _delete(self, row: dict) -> None:
+        if self.delete_record(
+            f"Evidence '{row['description']}'",
+            lambda: self.repos.evidence.delete(row["evidence_id"]),
+        ):
+            self.refresh()

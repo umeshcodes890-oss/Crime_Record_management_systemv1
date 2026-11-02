@@ -50,6 +50,10 @@ def apply_ttk_styles() -> None:
         foreground=c.TEXT,
         rowheight=32,
         borderwidth=0,
+        relief="flat",
+        bordercolor=c.SURFACE_ALT,
+        lightcolor=c.SURFACE_ALT,
+        darkcolor=c.SURFACE_ALT,
         font=("Segoe UI", 12),
     )
     style.map(
@@ -63,6 +67,8 @@ def apply_ttk_styles() -> None:
         foreground=c.TEXT_MUTED,
         relief="flat",
         borderwidth=0,
+        lightcolor=c.SURFACE,
+        darkcolor=c.SURFACE,
         font=("Segoe UI", 11, "bold"),
         padding=(8, 9),
     )
@@ -72,12 +78,20 @@ def apply_ttk_styles() -> None:
         foreground=[("active", c.TEXT)],
     )
     style.configure(
-        "Crime.Vertical.TScrollbar",
+        "Vertical.TScrollbar",
         background=c.SURFACE_HOVER,
         troughcolor=c.SURFACE,
         bordercolor=c.SURFACE,
+        lightcolor=c.SURFACE,
+        darkcolor=c.SURFACE,
         arrowcolor=c.TEXT_MUTED,
         borderwidth=0,
+        arrowsize=12,
+    )
+    style.map(
+        "Vertical.TScrollbar",
+        background=[("active", c.ACCENT)],
+        arrowcolor=[("active", c.ACCENT_TEXT)],
     )
 
 
@@ -197,6 +211,7 @@ class DataTable(ctk.CTkFrame):
         empty_text: str = "No records to show.",
         on_row_double: Callable[[dict], None] | None = None,
         on_selection: Callable[[dict | None], None] | None = None,
+        on_delete: Callable[[dict], None] | None = None,
         height: int = 380,
     ) -> None:
         kwargs = {}
@@ -208,6 +223,7 @@ class DataTable(ctk.CTkFrame):
         self._sort_desc = False
         self._on_row_double = on_row_double
         self._on_selection = on_selection
+        self._on_delete = on_delete
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -226,7 +242,17 @@ class DataTable(ctk.CTkFrame):
         self.count_label = ctk.CTkLabel(
             self.toolbar, text="", font=fonts().small, text_color=PALETTE.TEXT_DIM, anchor="e",
         )
-        self.count_label.grid(row=0, column=2, sticky="e")
+        self.count_label.grid(row=0, column=2, sticky="e", padx=(0, PAD_SM))
+
+        self.delete_button = None
+        if on_delete is not None:
+            self.delete_button = ctk.CTkButton(
+                self.toolbar, text="Delete", width=90, height=30, font=fonts().small,
+                fg_color="transparent", border_width=1, border_color=PALETTE.DANGER,
+                text_color=PALETTE.DANGER, hover_color=PALETTE.SURFACE_HOVER,
+                state="disabled", command=self._on_delete_click,
+            )
+            self.delete_button.grid(row=0, column=3, sticky="e", padx=(0, PAD))
 
         self.search_entry = None
         if searchable:
@@ -305,7 +331,8 @@ class DataTable(ctk.CTkFrame):
 
     def _sort_rows(self) -> None:
         if not self._sort_key:
-            self._filtered.sort(key=lambda r: r.get("occurrence_datetime"), reverse=True)
+            self._filtered.sort(key=lambda r: str(r.get("occurrence_datetime") or ""),
+                                reverse=True)
             return
         column = next((c for c in self.columns if c.key == self._sort_key), None)
         if column is None:
@@ -326,6 +353,8 @@ class DataTable(ctk.CTkFrame):
 
     def _redraw(self) -> None:
         self.tree.delete(*self.tree.get_children())
+        if self.delete_button is not None:
+            self.delete_button.configure(state="disabled")
         for index, row in enumerate(self._filtered):
             values = [self._cell_text(column, row) for column in self.columns]
             self.tree.insert("", "end", iid=str(index), values=values)
@@ -349,8 +378,16 @@ class DataTable(ctk.CTkFrame):
             self._on_row_double(row)
 
     def _on_select(self, _event=None) -> None:
+        if self.delete_button is not None:
+            self.delete_button.configure(
+                state="normal" if self.selected_row is not None else "disabled")
         if self._on_selection:
             self._on_selection(self.selected_row)
+
+    def _on_delete_click(self) -> None:
+        row = self.selected_row
+        if row is not None and self._on_delete:
+            self._on_delete(row)
 
     @property
     def selected_row(self) -> dict | None:
@@ -393,8 +430,7 @@ class FormPanel(ctk.CTkFrame):
     # -- building -----------------------------------------------------
     def _place(self, widget: tk.Widget, label: str, required: bool) -> None:
         row, column = divmod(self._row, self._columns)
-        if column == 0:
-            self._row += 1
+        self._row += 1
         holder = ctk.CTkFrame(self, fg_color="transparent")
         holder.grid(row=row, column=column, sticky="ew",
                    padx=(0, PAD), pady=(0, PAD))

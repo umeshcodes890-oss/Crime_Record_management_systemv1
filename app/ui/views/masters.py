@@ -7,9 +7,9 @@ from typing import Any
 import customtkinter as ctk
 
 from app.ui.dialogs import FormDialog
-from app.ui.theme import PAD, PAD_LG, RADIUS, fonts
+from app.ui.theme import PAD, PAD_LG, PAD_SM, RADIUS, fonts
 from app.ui.views.base import BaseView
-from app.ui.widgets import PALETTE, Column, DataTable, FormPanel, confirm
+from app.ui.widgets import PALETTE, Column, DataTable, FormPanel
 
 RANKS = ["Constable", "Sub-Inspector", "Inspector", "Deputy Superintendent of Police",
          "Superintendent of Police", "Additional Superintendent of Police"]
@@ -171,8 +171,10 @@ class _MasterView(BaseView):
         self.table = DataTable(
             self, self.columns(), title=self.table_title,
             empty_text=self.empty_text, on_row_double=self._edit,
+            on_delete=self._delete if self.is_admin() else None,
         )
         self.table.grid(row=1, column=0, sticky="nsew", padx=PAD_LG, pady=(0, PAD_LG))
+        self.refresh()
 
     def columns(self) -> list[Column]:
         raise NotImplementedError
@@ -187,6 +189,9 @@ class _MasterView(BaseView):
         raise NotImplementedError
 
     def _edit(self, row: dict) -> None:
+        raise NotImplementedError
+
+    def _delete(self, row: dict) -> None:
         raise NotImplementedError
 
 
@@ -219,6 +224,13 @@ class StationsView(_MasterView):
         dialog = StationDialog(self.app, self.repos, row)
         if dialog.show():
             self.app.toast("Station updated", "success")
+            self.refresh()
+
+    def _delete(self, row: dict) -> None:
+        if self.delete_record(
+            f"Police station '{row['name']}'",
+            lambda: self.repos.stations.delete(row["station_id"]),
+        ):
             self.refresh()
 
 
@@ -255,6 +267,13 @@ class OfficersView(_MasterView):
             self.app.toast("Officer updated", "success")
             self.refresh()
 
+    def _delete(self, row: dict) -> None:
+        if self.delete_record(
+            f"Officer '{row['name']}' ({row['badge_no']})",
+            lambda: self.repos.officers.delete(row["officer_id"]),
+        ):
+            self.refresh()
+
 
 class OffencesView(_MasterView):
     heading = "Law library"
@@ -286,4 +305,11 @@ class OffencesView(_MasterView):
         dialog = OffenceDialog(self.app, self.repos, section)
         if dialog.show():
             self.app.toast("Offence section updated", "success")
+            self.refresh()
+
+    def _delete(self, row: dict) -> None:
+        if self.delete_record(
+            f"Section {row['law_code']} {row['section_no']} ({row['offence_name']})",
+            lambda: self.repos.offences.delete(row["section_id"]),
+        ):
             self.refresh()

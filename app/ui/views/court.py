@@ -7,9 +7,9 @@ from typing import Any
 import customtkinter as ctk
 
 from app.ui.dialogs import FormDialog
-from app.ui.theme import PAD, PAD_LG, RADIUS, fonts
+from app.ui.theme import PAD, PAD_LG
 from app.ui.views.base import BaseView
-from app.ui.widgets import PALETTE, Column, DataTable, FormPanel
+from app.ui.widgets import Column, DataTable, FormPanel
 
 STAGES = ["first_hearing", "charge_frame", "evidence", "arguments", "verdict"]
 VERDICTS = ["guilty", "acquitted", "case_dismissed"]
@@ -103,6 +103,7 @@ class CourtView(BaseView):
             title="Court proceedings",
             empty_text="No court proceedings recorded yet.",
             on_row_double=lambda row: self.app.navigate("cases", case_id=row["case_id"]),
+            on_delete=self._delete_proceeding if self.can_write() else None,
         )
         self.proceedings_table.grid(row=0, column=0, sticky="nsew", padx=PAD_LG, pady=(PAD_LG, PAD))
 
@@ -121,9 +122,25 @@ class CourtView(BaseView):
             title="Convictions",
             empty_text="No convictions recorded yet.",
             on_row_double=lambda row: self.app.navigate("cases", case_id=row["case_id"]),
+            on_delete=self._delete_conviction if self.can_write() else None,
         )
         self.convictions_table.grid(row=1, column=0, sticky="nsew", padx=PAD_LG, pady=(0, PAD_LG))
+        self.refresh()
 
     def refresh(self) -> None:
         self.proceedings_table.set_rows(self.guard(self.repos.proceedings.list_all) or [])
         self.convictions_table.set_rows(self.guard(self.repos.convictions.list_all) or [])
+
+    def _delete_proceeding(self, row: dict) -> None:
+        if self.delete_record(
+            f"Proceeding on {row['hearing_datetime']} at {row['court_name']}",
+            lambda: self.repos.proceedings.delete(row["proceeding_id"]),
+        ):
+            self.refresh()
+
+    def _delete_conviction(self, row: dict) -> None:
+        if self.delete_record(
+            f"Conviction of {row['suspect_name']} ({row['verdict']})",
+            lambda: self.repos.convictions.delete(row["conviction_id"]),
+        ):
+            self.refresh()

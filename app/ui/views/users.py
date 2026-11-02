@@ -8,7 +8,7 @@ import customtkinter as ctk
 
 from app.db.auth import ALL_ROLES
 from app.ui.dialogs import FormDialog
-from app.ui.theme import PAD, PAD_LG, RADIUS, fonts
+from app.ui.theme import PAD, PAD_LG, PAD_SM, RADIUS, fonts
 from app.ui.views.base import BaseView
 from app.ui.widgets import PALETTE, Column, DataTable, FormPanel, confirm
 
@@ -121,8 +121,10 @@ class UsersView(BaseView):
             title="Accounts",
             empty_text="No user accounts.",
             on_row_double=self._edit,
+            on_delete=self._delete if self.is_admin() else None,
         )
         self.table.grid(row=1, column=0, sticky="nsew", padx=PAD_LG, pady=(0, PAD_LG))
+        self.refresh()
 
     def refresh(self) -> None:
         self.table.set_rows(self.guard(self.repos.users.list_all) or [])
@@ -147,3 +149,19 @@ class UsersView(BaseView):
             dialog = PasswordDialog(self.app, self.repos, row)
             if dialog.show():
                 self.app.toast("Password reset", "success")
+
+    def _delete(self, row: dict) -> None:
+        if row["user_id"] == self.user.get("user_id"):
+            self.app.toast("You cannot delete the account you are signed in with.",
+                           "warning")
+            return
+        if (row["role"] == "admin" and row.get("is_active")
+                and self.repos.users.count_active_admins() <= 1):
+            self.app.toast("At least one active administrator has to remain.",
+                           "warning")
+            return
+        if self.delete_record(
+            f"User account '{row['username']}'",
+            lambda: self.repos.users.delete(row["user_id"]),
+        ):
+            self.refresh()

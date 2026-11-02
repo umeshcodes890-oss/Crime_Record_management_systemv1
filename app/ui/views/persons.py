@@ -7,9 +7,9 @@ from typing import Any
 import customtkinter as ctk
 
 from app.ui.dialogs import FormDialog
-from app.ui.theme import PAD, PAD_LG, RADIUS, fonts
+from app.ui.theme import PAD, PAD_LG, PAD_SM, RADIUS, fonts
 from app.ui.views.base import BaseView
-from app.ui.widgets import PALETTE, Column, DataTable, FormPanel, confirm
+from app.ui.widgets import PALETTE, Column, DataTable, FormPanel
 
 SUSPECT_STATUSES = [
     "wanted", "arrested", "in_custody", "bailed", "released",
@@ -134,8 +134,10 @@ class _PeopleView(BaseView):
         self.table = DataTable(
             self, self.columns(), title=self.title_text, empty_text=self.empty_text,
             on_row_double=lambda row: self.app.navigate("cases", case_id=row["case_id"]),
+            on_delete=self._delete if self.can_write() else None,
         )
         self.table.grid(row=1, column=0, sticky="nsew", padx=PAD_LG, pady=(0, PAD_LG))
+        self.refresh()
 
     def columns(self) -> list[Column]:
         raise NotImplementedError
@@ -145,6 +147,9 @@ class _PeopleView(BaseView):
 
     def refresh(self) -> None:
         self.table.set_rows(self.guard(self.load) or [])
+
+    def _delete(self, row: dict) -> None:
+        raise NotImplementedError
 
 
 class SuspectsView(_PeopleView):
@@ -166,6 +171,13 @@ class SuspectsView(_PeopleView):
     def load(self) -> list[dict]:
         return self.repos.suspects.list_all(search=self.search.get().strip() or None)
 
+    def _delete(self, row: dict) -> None:
+        if self.delete_record(
+            f"Suspect '{row['name']}'",
+            lambda: self.repos.suspects.delete(row["suspect_id"]),
+        ):
+            self.refresh()
+
 
 class VictimsView(_PeopleView):
     title_text = "Victim register"
@@ -184,6 +196,13 @@ class VictimsView(_PeopleView):
     def load(self) -> list[dict]:
         return self.repos.victims.list_all(search=self.search.get().strip() or None)
 
+    def _delete(self, row: dict) -> None:
+        if self.delete_record(
+            f"Victim '{row['name']}'",
+            lambda: self.repos.victims.delete(row["victim_id"]),
+        ):
+            self.refresh()
+
 
 class WitnessesView(_PeopleView):
     title_text = "Witness register"
@@ -201,3 +220,10 @@ class WitnessesView(_PeopleView):
 
     def load(self) -> list[dict]:
         return self.repos.witnesses.list_all(search=self.search.get().strip() or None)
+
+    def _delete(self, row: dict) -> None:
+        if self.delete_record(
+            f"Witness '{row['name']}'",
+            lambda: self.repos.witnesses.delete(row["witness_id"]),
+        ):
+            self.refresh()

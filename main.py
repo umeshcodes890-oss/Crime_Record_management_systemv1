@@ -14,7 +14,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from app.db.connection import ConfigError, ConnectionLost, Database, DatabaseError  # noqa: E402
 from app.ui.app_window import AppWindow  # noqa: E402
 from app.ui.login import LoginScreen  # noqa: E402
-from app.ui.theme import PAD, PAD_LG, PAD_XL, fonts  # noqa: E402
+from app.ui.theme import PAD, PAD_LG, PAD_SM, PAD_XL, fonts  # noqa: E402
 from app.ui.widgets import PALETTE, apply_ttk_styles  # noqa: E402
 
 LOG_DIR = PROJECT_ROOT / "logs"
@@ -38,12 +38,27 @@ class Application:
         self.root.title("Crime Record Management System")
         self.root.geometry("1380x880")
         self.root.minsize(1200, 760)
+        self.root.protocol("WM_DELETE_WINDOW", self.quit)
 
         apply_ttk_styles()
 
         self.db: Database | None = None
         self.window: AppWindow | None = None
         self.show_login()
+
+    def quit(self) -> None:
+        """Close the window without leaving Tcl noise in the console.
+
+        CustomTkinter keeps a repeating 'after' callback alive for DPI
+        scaling; if it is still pending when the root is destroyed, Tk
+        complains about an invalid command name on the way out.
+        """
+        try:
+            for callback in self.root.tk.call("after", "info"):
+                self.root.after_cancel(callback)
+        except Exception:
+            pass
+        self.root.destroy()
 
     def clear(self) -> None:
         for child in self.root.winfo_children():
@@ -102,7 +117,7 @@ class Application:
         ctk.CTkButton(
             buttons, text="Quit", width=110, height=36, font=fonts().body,
             fg_color="transparent", border_width=1, border_color=PALETTE.BORDER,
-            text_color=PALETTE.TEXT, command=self.root.destroy,
+            text_color=PALETTE.TEXT, command=self.quit,
         ).pack(side="left", padx=(0, PAD))
         ctk.CTkButton(
             buttons, text="Retry", width=110, height=36, font=fonts().body_bold,

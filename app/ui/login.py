@@ -6,8 +6,8 @@ import customtkinter as ctk
 
 from app.db.auth import UserRepository
 from app.db.connection import Database, DatabaseError
-from app.ui.theme import PAD, PAD_LG, PAD_XL, RADIUS, fonts
-from app.ui.widgets import PALETTE, toast
+from app.ui.theme import PAD, PAD_LG, PAD_SM, PAD_XL, fonts
+from app.ui.widgets import PALETTE
 
 
 class LoginScreen(ctk.CTkFrame):
@@ -22,10 +22,9 @@ class LoginScreen(ctk.CTkFrame):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self.card = ctk.CTkFrame(self, fg_color=PALETTE.SURFACE, corner_radius=16, width=420)
+        self.card = ctk.CTkFrame(self, fg_color=PALETTE.SURFACE, corner_radius=16)
         self.card.grid(row=0, column=0)
         self.card.grid_columnconfigure(0, weight=1)
-        self.card.grid_propagate(False)
 
         ctk.CTkLabel(
             self.card, text="Crime Record", font=fonts().display,
@@ -41,14 +40,14 @@ class LoginScreen(ctk.CTkFrame):
         ).grid(row=2, column=0, padx=PAD_XL, pady=(0, PAD_LG))
 
         self.username = ctk.CTkEntry(
-            self.card, height=40, placeholder_text="Username",
+            self.card, height=40, width=356, placeholder_text="Username",
             font=fonts().body, fg_color=PALETTE.SURFACE_ALT,
             border_color=PALETTE.BORDER, border_width=1,
         )
         self.username.grid(row=3, column=0, padx=PAD_XL, sticky="ew", pady=(0, PAD))
 
         self.password = ctk.CTkEntry(
-            self.card, height=40, placeholder_text="Password", show="*",
+            self.card, height=40, width=356, placeholder_text="Password", show="*",
             font=fonts().body, fg_color=PALETTE.SURFACE_ALT,
             border_color=PALETTE.BORDER, border_width=1,
         )
@@ -56,7 +55,7 @@ class LoginScreen(ctk.CTkFrame):
 
         self.error = ctk.CTkLabel(
             self.card, text="", font=fonts().small, text_color=PALETTE.DANGER,
-            wraplength=340, justify="left",
+            wraplength=356, justify="left",
         )
         self.error.grid(row=5, column=0, padx=PAD_XL, sticky="ew")
 

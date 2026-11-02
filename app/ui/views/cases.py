@@ -10,13 +10,15 @@ from app.db.connection import DatabaseError
 from app.ui.dialogs import FormDialog
 from app.ui.theme import PAD, PAD_LG, PAD_SM, RADIUS, fonts, status_label
 from app.ui.views.base import BaseView
+from app.ui.views.court import ConvictionDialog, ProceedingDialog, REMAND_STATUSES
+from app.ui.views.evidence import EvidenceDialog
+from app.ui.views.persons import SuspectDialog, VictimDialog, WitnessDialog
 from app.ui.widgets import (
     PALETTE,
     Column,
     DataTable,
     FormPanel,
     StatusPill,
-    confirm,
     toast,
 )
 
@@ -168,6 +170,96 @@ class ChangeStatusDialog(FormDialog):
                       if status_label(option) == label)
         self.repos.cases.update_status(
             self.case["case_id"], target, self.user["user_id"], values.get("remark") or None
+        )
+
+
+# ----------------------------------------------------------------------
+class AddOffenceDialog(FormDialog):
+    """Charge one more offence section against the case."""
+
+    ACCUSED_ROLES = ["primary", "secondary"]
+
+    def __init__(self, master, repos, case_id: int) -> None:
+        self.repos = repos
+        self.case_id = case_id
+        self._sections: list[dict] = []
+        super().__init__(master, "Add an offence section", size=(660, 340),
+                         save_text="Add section")
+
+    def build(self, form: FormPanel) -> None:
+        self._sections = self.repos.offences.options()
+        form.add_choice(
+            "section", "Offence section",
+            [f"{row['law_code']} {row['section_no']}  {row['offence_name']}"
+             for row in self._sections] or ["The law library is empty"],
+        )
+        form.add_choice("role", "Accused role", self.ACCUSED_ROLES)
+
+    def validate(self, values: dict[str, Any]) -> bool:
+        if not self._sections:
+            self.error.configure(text="There are no offence sections to choose from.")
+            return False
+        return True
+
+    def on_save(self, values: dict[str, Any]) -> None:
+        label = values["section"]
+        section = next(
+            (row for row in self._sections
+             if label.startswith(f"{row['law_code']} {row['section_no']}")),
+            self._sections[0],
+        )
+        self.repos.cases.add_offence(self.case_id, section["section_id"],
+                                     values.get("role", "primary"))
+
+
+# ----------------------------------------------------------------------
+class ArrestDialog(FormDialog):
+    """Record an arrest against a suspect on this case."""
+
+    def __init__(self, master, repos, case_id: int) -> None:
+        self.repos = repos
+        self.case_id = case_id
+        self._suspects: list[dict] = []
+        super().__init__(master, "Record an arrest", size=(680, 540),
+                         save_text="Record arrest")
+
+    def build(self, form: FormPanel) -> None:
+        self._suspects = self.repos.suspects.for_case(self.case_id)
+        officers = self.repos.officers.options()
+        form.add_choice("suspect", "Suspect",
+                        [row["name"] for row in self._suspects] or ["No suspects on this case"])
+        form.add_choice("officer", "Arresting officer",
+                        [f"{row['name']} - {row['rank']}" for row in officers] or ["No officers"])
+        form.add_datetime("arrested", "Date and time of arrest", required=True)
+        form.add_entry("place", "Place of arrest")
+        form.add_choice("remand", "Remand status", REMAND_STATUSES)
+        form.add_entry("bail", "Bail amount")
+
+    def validate(self, values: dict[str, Any]) -> bool:
+        if not self._suspects:
+            self.error.configure(text="Add a suspect to this case first.")
+            return False
+        return True
+
+    def on_save(self, values: dict[str, Any]) -> None:
+        suspect = next((row for row in self._suspects
+                        if row["name"] == values["suspect"]), None)
+        if suspect is None:
+            raise ValueError("Choose the suspect who was arrested.")
+
+        officers = self.repos.officers.options()
+        officer = next((row for row in officers
+                        if values["officer"].startswith(row["name"])), None)
+        if officer is None:
+            raise ValueError("Choose the arresting officer.")
+
+        bail_text = values.get("bail", "")
+        bail = float(bail_text) if bail_text.replace(".", "", 1).isdigit() else None
+
+        self.repos.arrests.record(
+            self.case_id, suspect["suspect_id"], officer["officer_id"],
+            values["arrested"], values.get("place") or None,
+            values.get("remand", "not_remanded"), bail,
         )
 
 
@@ -343,21 +435,16 @@ class CasesView(BaseView):
 
 
 # ----------------------------------------------------------------------
-class CaseDetailView(ctk.CTkFrame):
+class CaseDetailView(BaseView):
     """Everything known about one case, tab by tab."""
 
     def __init__(self, master, app, case_id: int, on_back) -> None:
-        super().__init__(master, fg_color=PALETTE.BG)
-        self.app = app
-        self.db = app.db
-        self.user = app.user
+        super().__init__(master, app)
         self.case_id = case_id
         self.on_back = on_back
 
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
-
-        self.repos = RepositoriesProxy(app.db)
 
         self._build_header()
         self._build_tabs()
@@ -406,6 +493,14 @@ class CaseDetailView(ctk.CTkFrame):
                 fg_color=PALETTE.SURFACE_ALT, hover_color=PALETTE.SURFACE_HOVER,
                 text_color=PALETTE.TEXT, command=self._assign_officer,
             ).grid(row=0, column=2)
+
+        if self.is_admin():
+            ctk.CTkButton(
+                right, text="Delete case", width=130, height=36, font=fonts().body,
+                fg_color="transparent", border_width=1, border_color=PALETTE.DANGER,
+                text_color=PALETTE.DANGER, hover_color=PALETTE.SURFACE_HOVER,
+                command=self._delete_case,
+            ).grid(row=0, column=3, padx=(PAD_SM, 0))
 
     def _build_tabs(self) -> None:
         self.tabs = ctk.CTkTabview(self, fg_color=PALETTE.SURFACE,
@@ -462,7 +557,8 @@ class CaseDetailView(ctk.CTkFrame):
         self._fill_history()
 
     def _table_host(self, tab, title: str, columns: list[Column],
-                    *, on_add=None, add_text: str = "Add", height: int = 340):
+                    *, on_add=None, add_text: str = "Add", height: int = 340,
+                    on_delete=None):
         for child in tab.winfo_children():
             child.destroy()
         tab.grid_columnconfigure(0, weight=1)
@@ -481,7 +577,8 @@ class CaseDetailView(ctk.CTkFrame):
                 text_color=PALETTE.ACCENT_TEXT, command=on_add,
             ).grid(row=0, column=1, sticky="e")
 
-        table = DataTable(tab, columns, title="", searchable=True, height=height)
+        table = DataTable(tab, columns, title="", searchable=True, height=height,
+                          on_delete=on_delete)
         table.grid(row=1, column=0, sticky="nsew", padx=(PAD, PAD), pady=(0, PAD))
         return table
 
@@ -541,6 +638,12 @@ class CaseDetailView(ctk.CTkFrame):
                 Column("severity", "Severity", 100),
                 Column("accused_role", "Role", 110),
             ],
+            on_add=self._add_action(self._add_offence),
+            on_delete=self._delete_action(lambda row: self.delete_record(
+                f"Section {row['law_code']} {row['section_no']} "
+                f"({row['offence_name']}) from this case",
+                lambda: self.repos.cases.remove_offence(self.case_id, row["section_id"]),
+            )),
         )
         table.set_rows(self.repos.cases.offences(self.case_id))
 
@@ -555,6 +658,11 @@ class CaseDetailView(ctk.CTkFrame):
                 Column("arrest_count", "Arrests", 80, anchor="center"),
                 Column("conviction_count", "Convictions", 100, anchor="center"),
             ],
+            on_add=self._add_action(self._add_suspect),
+            on_delete=self._delete_action(lambda row: self.delete_record(
+                f"Suspect '{row['name']}'",
+                lambda: self.repos.suspects.delete(row["suspect_id"]),
+            )),
         )
         table.set_rows(self.repos.suspects.for_case(self.case_id))
 
@@ -568,6 +676,11 @@ class CaseDetailView(ctk.CTkFrame):
                 Column("injury_level", "Injury", 130),
                 Column("phone", "Phone", 130),
             ],
+            on_add=self._add_action(self._add_victim),
+            on_delete=self._delete_action(lambda row: self.delete_record(
+                f"Victim '{row['name']}'",
+                lambda: self.repos.victims.delete(row["victim_id"]),
+            )),
         )
         table.set_rows(self.repos.victims.for_case(self.case_id))
 
@@ -581,6 +694,11 @@ class CaseDetailView(ctk.CTkFrame):
                        render=lambda row: "Yes" if row.get("is_reliable") else "No"),
                 Column("statement", "Statement", 420),
             ],
+            on_add=self._add_action(self._add_witness),
+            on_delete=self._delete_action(lambda row: self.delete_record(
+                f"Witness '{row['name']}'",
+                lambda: self.repos.witnesses.delete(row["witness_id"]),
+            )),
         )
         table.set_rows(self.repos.witnesses.for_case(self.case_id))
 
@@ -595,6 +713,11 @@ class CaseDetailView(ctk.CTkFrame):
                 Column("chain_of_custody_datetime", "Chain of custody", 150),
                 Column("storage_location", "Storage", 140),
             ],
+            on_add=self._add_action(self._add_evidence),
+            on_delete=self._delete_action(lambda row: self.delete_record(
+                f"Evidence '{row['description']}'",
+                lambda: self.repos.evidence.delete(row["evidence_id"]),
+            )),
         )
         table.set_rows(self.repos.evidence.for_case(self.case_id))
 
@@ -609,6 +732,11 @@ class CaseDetailView(ctk.CTkFrame):
                 Column("bail_amount", "Bail", 110, anchor="e"),
                 Column("arrested_by_name", "Arrested by", 160),
             ],
+            on_add=self._add_action(self._add_arrest),
+            on_delete=self._delete_action(lambda row: self.delete_record(
+                f"The arrest of {row['suspect_name']} on {row['arrest_datetime']}",
+                lambda: self.repos.arrests.delete(row["arrest_id"]),
+            )),
         )
         table.set_rows(self.repos.arrests.for_case(self.case_id))
 
@@ -622,6 +750,11 @@ class CaseDetailView(ctk.CTkFrame):
                 Column("judge_name", "Judge", 150),
                 Column("next_hearing_datetime", "Next hearing", 150),
             ],
+            on_add=self._add_action(self._add_proceeding),
+            on_delete=self._delete_action(lambda row: self.delete_record(
+                f"The hearing on {row['hearing_datetime']} at {row['court_name']}",
+                lambda: self.repos.proceedings.delete(row["proceeding_id"]),
+            )),
         )
         table.set_rows(self.repos.proceedings.for_case(self.case_id))
 
@@ -637,6 +770,11 @@ class CaseDetailView(ctk.CTkFrame):
                 Column("fine_amount", "Fine", 110, anchor="e"),
                 Column("release_expected", "Release expected", 140),
             ],
+            on_add=self._add_action(self._add_conviction),
+            on_delete=self._delete_action(lambda row: self.delete_record(
+                f"The conviction of {row['suspect_name']} ({row['verdict']})",
+                lambda: self.repos.convictions.delete(row["conviction_id"]),
+            )),
         )
         table.set_rows(self.repos.convictions.for_case(self.case_id))
 
@@ -655,6 +793,56 @@ class CaseDetailView(ctk.CTkFrame):
             ],
         )
         table.set_rows(self.repos.cases.history(self.case_id))
+
+    # ------------------------------------------------------------------
+    def _add_action(self, opener):
+        """Wrap a dialog opener so the Add button only shows for writers."""
+        if self.user.get("role") not in ("admin", "officer"):
+            return None
+
+        def _open() -> None:
+            try:
+                opener()
+            except DatabaseError as exc:
+                self.app.toast(str(exc), "error", 6000)
+
+        return _open
+
+    def _delete_action(self, action):
+        """Only writers get a delete button on the child tables."""
+        return action if self.can_write() else None
+
+    def _add_offence(self) -> None:
+        if AddOffenceDialog(self.app, self.repos, self.case_id).show():
+            self.reload()
+
+    def _add_suspect(self) -> None:
+        if SuspectDialog(self.app, self.repos, self.case_id).show():
+            self.reload()
+
+    def _add_victim(self) -> None:
+        if VictimDialog(self.app, self.repos, self.case_id).show():
+            self.reload()
+
+    def _add_witness(self) -> None:
+        if WitnessDialog(self.app, self.repos, self.case_id).show():
+            self.reload()
+
+    def _add_evidence(self) -> None:
+        if EvidenceDialog(self.app, self.repos, self.case_id).show():
+            self.reload()
+
+    def _add_arrest(self) -> None:
+        if ArrestDialog(self.app, self.repos, self.case_id).show():
+            self.reload()
+
+    def _add_proceeding(self) -> None:
+        if ProceedingDialog(self.app, self.repos, self.case_id).show():
+            self.reload()
+
+    def _add_conviction(self) -> None:
+        if ConvictionDialog(self.app, self.repos, self.case_id, self.user).show():
+            self.reload()
 
     # ------------------------------------------------------------------
     def _change_status(self) -> None:
@@ -685,13 +873,9 @@ class CaseDetailView(ctk.CTkFrame):
         self.app.toast("Officer assigned", "success")
         self.reload()
 
-
-class RepositoriesProxy:
-    """Small helper so the detail view reaches the repositories."""
-
-    def __init__(self, db) -> None:
-        from app.db.repositories import Repositories
-        self._repos = Repositories(db)
-
-    def __getattr__(self, item):
-        return getattr(self._repos, item)
+    def _delete_case(self) -> None:
+        if self.delete_record(
+            f"Case {self.case['case_no']} and every record filed under it",
+            lambda: self.repos.cases.delete(self.case_id),
+        ):
+            self.on_back()

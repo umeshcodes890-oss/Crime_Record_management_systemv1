@@ -9,7 +9,7 @@ import customtkinter as ctk
 
 from app.db.auth import ROLE_ADMIN
 from app.db.connection import Database, DatabaseError
-from app.ui.theme import PAD, PAD_LG, PAD_SM, RADIUS, fonts
+from app.ui.theme import PAD, PAD_LG, PAD_SM, RADIUS, RADIUS_SM, fonts
 from app.ui.widgets import PALETTE, set_mode, toast
 
 
@@ -20,7 +20,7 @@ class NavItem:
     title: str
     subtitle: str
     roles: tuple[str, ...]
-    factory: Callable[["AppWindow"], ctk.CTkFrame]
+    factory: Callable[["AppWindow", "AppWindow"], ctk.CTkFrame]
     group: str = "Operations"
 
 
@@ -36,7 +36,7 @@ class AppWindow(ctk.CTkFrame):
         self._view_key: str | None = None
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
 
-        self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(1, weight=1)
 
         self._build_sidebar()
@@ -50,7 +50,7 @@ class AppWindow(ctk.CTkFrame):
     # ------------------------------------------------------------------
     def _build_sidebar(self) -> None:
         self.sidebar = ctk.CTkFrame(self, fg_color=PALETTE.SURFACE, corner_radius=0, width=236)
-        self.sidebar.grid(row=0, column=0, sticky="nsw")
+        self.sidebar.grid(row=0, column=0, rowspan=2, sticky="nsew")
         self.sidebar.grid_propagate(False)
         self.sidebar.grid_rowconfigure(2, weight=1)
         self.sidebar.grid_columnconfigure(0, weight=1)
@@ -226,7 +226,7 @@ class AppWindow(ctk.CTkFrame):
         self.page_title.configure(text=item.title)
         self.page_subtitle.configure(text=item.subtitle)
 
-        view = item.factory(self)
+        view = item.factory(self.content, self)
         if kwargs:
             setter = getattr(view, "open_detail", None)
             if setter:
@@ -260,7 +260,7 @@ class AppWindow(ctk.CTkFrame):
         self._view_key = None
         self.theme_button = None
 
-        self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(1, weight=1)
         self._build_sidebar()
         self._build_header()

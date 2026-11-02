@@ -9,7 +9,7 @@ import customtkinter as ctk
 from app.db.connection import DatabaseError
 from app.db.repositories import Repositories
 from app.ui.theme import fonts
-from app.ui.widgets import PALETTE
+from app.ui.widgets import PALETTE, confirm
 
 
 class BaseView(ctk.CTkFrame):
@@ -28,7 +28,7 @@ class BaseView(ctk.CTkFrame):
     @property
     def repos(self) -> Repositories:
         if self._repos is None:
-            self._repos = Repositories(self.db)
+            self._repos = Repositories(self.db, self.user)
         return self._repos
 
     # -- helpers ------------------------------------------------------
@@ -51,6 +51,19 @@ class BaseView(ctk.CTkFrame):
         if success:
             self.app.toast(success, "success")
         return result
+
+    def delete_record(self, subject: str, action: Callable[[], None]) -> bool:
+        """Ask for confirmation, then run a delete and report the outcome."""
+        if not confirm(self.app, "Delete record",
+                       f"{subject}\n\nThis cannot be undone.", "Delete", danger=True):
+            return False
+        try:
+            action()
+        except DatabaseError as exc:
+            self.app.toast(str(exc), "error", 6500)
+            return False
+        self.app.toast("Record deleted", "success")
+        return True
 
     def toolbar(self, parent, title: str = "", subtitle: str = "") -> ctk.CTkFrame:
         bar = ctk.CTkFrame(parent, fg_color="transparent")

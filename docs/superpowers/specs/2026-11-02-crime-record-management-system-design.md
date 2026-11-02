@@ -73,6 +73,7 @@ depends only on the key, and every multi-valued attribute is pulled into its own
 | min_imprisonment_yrs | DECIMAL(4,1) | |
 | max_imprisonment_yrs | DECIMAL(4,1) | |
 | fine_cap | DECIMAL(12,2) | nullable |
+| description | TEXT | nullable |
 | UNIQUE(law_code, section_no) | | |
 
 **`users`**
@@ -96,7 +97,7 @@ depends only on the key, and every multi-valued attribute is pulled into its own
 | station_id | INT FK→police_stations | indexed, RESTRICT |
 | investigating_officer_id | INT FK→officers | indexed, RESTRICT |
 | filed_by_user_id | INT FK→users | indexed, RESTRICT |
-| category | VARCHAR(60) | theft / assault / fraud / homicide / cyber / missing_person / other |
+| category | VARCHAR(60) | theft / assault / fraud / homicide / cyber / missing_person / arson / drugs / other |
 | offence_type | VARCHAR(120) | free-text classification |
 | occurrence_datetime | DATETIME | |
 | reporting_datetime | DATETIME | |
@@ -182,12 +183,14 @@ erDiagram
 - Every FK is declared explicitly with a delete rule. `RESTRICT` on masters (stations,
   officers, users, offence sections) so a station cannot be deleted while it holds cases;
   `CASCADE` on case children so deleting a case removes its suspects, evidence and history.
-- `CHECK` constraints on `min_imprisonment_yrs <= max_imprisonment_yrs`,
-  `occurrence_datetime <= reporting_datetime`, and `fine_amount >= 0`.
+- `CHECK` constraints carry the rules a column type cannot: `min_imprisonment_yrs <=
+  max_imprisonment_yrs`, `occurrence_datetime <= reporting_datetime`, `closed_datetime`
+  present exactly when the case is closed, victim age between 0 and 120, and
+  `bail_amount` / `fine_amount` not negative.
 - Indexes on every column used for filtering or joining: `crime_cases(status)`,
   `crime_cases(station_id)`, `crime_cases(investigating_officer_id)`,
   `crime_cases(occurrence_datetime)`, `suspects(case_id)`, `evidence(case_id)`, plus
-  full-text-ish prefix indexes on `case_no`, `badge_no`, `username`.
+  prefix indexes on `case_no`, `badge_no`, `username`.
 
 ---
 
@@ -206,6 +209,7 @@ simple reads. Nothing in Python duplicates a rule that belongs in the database.
 | `v_offence_statistics` | per offence section: case count, distinct cases, severity |
 | `v_monthly_caseload` | cases registered and closed per month for the last 24 months |
 | `v_suspect_summary` | per suspect: case count, current status, total sentence years |
+| `v_upcoming_hearings` | next hearing per case with days remaining, for the dashboard and Court screen |
 
 ### 3.2 Stored procedures
 
@@ -229,6 +233,7 @@ simple reads. Nothing in Python duplicates a rule that belongs in the database.
 | `trg_suspects_after_arrest` | AFTER INSERT on `arrests` | sets the suspect status to `arrested` |
 | `trg_suspects_after_conviction` | AFTER INSERT on `convictions` | sets the suspect status to `convicted` / `acquitted` |
 | `trg_case_offences_after_insert` | AFTER INSERT on `case_offences` | maintains `crime_cases.offence_count` |
+| `trg_case_offences_after_delete` | AFTER DELETE on `case_offences` | decrements `crime_cases.offence_count` |
 | `trg_evidence_after_insert` | AFTER INSERT on `evidence` | stamps `chain_of_custody_datetime` when the evidence row is created without one |
 
 ### 3.4 Case status workflow
@@ -239,8 +244,21 @@ registered ──▶ under_investigation ──▶ charges_filed ──▶ trial
      └────────────────┴──────────────────────┴──────────────────────▶ closed_untraceable
 ```
 
-`sp_update_case_status` rejects any transition not on this graph with a clear SQLSTATE
-message, which the UI surfaces as "Cannot move a registered case straight to Trial."
+The rule the database enforces is **forward-only by rank**, not a fixed edge list. Each
+status carries a rank — `registered` 1, `under_investigation` 2, `charges_filed` 3,
+`trial` 4, every `closed_*` 5. `sp_update_case_status` rejects a move whose target rank
+is not greater than the current rank, and rejects any change to a case that is already
+closed. In practice that means a case may skip a stage (a property case can go straight
+from `registered` to `closed_untraceable`) but can never run backwards, and a closed case
+cannot be reopened.
+
+Both rejections are `SIGNAL SQLSTATE '45000'` with a message the UI surfaces verbatim:
+*"A case cannot move backwards in the investigation lifecycle"* and *"Case is already
+closed and cannot be reopened"*.
+
+A `CHECK` constraint keeps `crime_cases.closed_datetime` consistent with `status`: the
+column is `NOT NULL` exactly when the status is one of the three closed states, and
+`NULL` otherwise.
 
 ---
 
@@ -263,14 +281,15 @@ Database      MySQL 8.0             tables, views, procedures, triggers
 - A repository method returns plain dicts (or a list of dicts) — `cursor(dictionary=True)`.
 - Every query is parameterised (`%s` placeholders). No string interpolation of user input
   into SQL, ever.
-- `connection.py` owns a small connection pool and re-establishes the connection if the
-  server drops it, so a long-running desktop session survives a MySQL restart.
+- `connection.py` owns a single connection guarded by a re-entrant lock. If the server
+  drops it, the next query reconnects transparently, so a long-running desktop session
+  survives a MySQL restart.
 
 ### 4.2 File layout
 
 ```
 CrimeRecordManagementSystem/
-├── main.py                     entry point
+├── main.py                     entry point: login screen → app shell
 ├── config.ini                  local credentials (git-ignored)
 ├── config.ini.template
 ├── requirements.txt
@@ -280,28 +299,45 @@ CrimeRecordManagementSystem/
 │   ├── views.sql
 │   ├── procedures.sql
 │   ├── triggers.sql
-│   └── reference_data.sql      stations, offence sections, admin user
+│   └── reference_data.sql      stations, offence sections
 ├── scripts/
 │   ├── setup_db.py             applies all sql/ files, idempotent
-│   └── selftest.py             schema + procedure assertions
+│   └── selftest.py             schema + procedure + role assertions
 ├── app/
 │   ├── db/
-│   │   ├── connection.py
-│   │   ├── auth.py  stations.py  officers.py  offences.py
-│   │   ├── cases.py  persons.py  evidence.py  legal.py  reports.py
+│   │   ├── connection.py       config load, connection, error translation
+│   │   ├── auth.py             users, login, role checks, Repository base
+│   │   ├── passwords.py        PBKDF2 hashing
+│   │   ├── masters.py          stations, officers, offence sections
+│   │   ├── cases.py            case filing, search, status workflow
+│   │   ├── persons.py          suspects, victims, witnesses
+│   │   ├── evidence.py
+│   │   ├── legal.py            arrests, proceedings, convictions
+│   │   ├── reports.py          dashboard aggregations
+│   │   └── repositories.py     one place to reach every repository
 │   ├── ui/
-│   │   ├── theme.py  widgets.py  app_window.py  login.py
+│   │   ├── theme.py            palette, fonts, spacing
+│   │   ├── widgets.py          Card, StatCard, DataTable, FormPanel, toast
+│   │   ├── charts.py           matplotlib helpers
+│   │   ├── dialogs.py          FormDialog, ChoiceDialog
+│   │   ├── login.py
+│   │   ├── app_window.py       sidebar, header, role-filtered navigation
 │   │   └── views/
-│   │       ├── dashboard.py  cases.py  case_detail.py
-│   │       ├── persons.py  evidence.py  legal.py
-│   │       ├── masters.py (stations/officers/offences)  users.py
+│   │       ├── base.py         shared screen behaviour
+│   │       ├── dashboard.py
+│   │       ├── cases.py        case list, filing form, case detail
+│   │       ├── persons.py      suspects, victims, witnesses
+│   │       ├── evidence.py
+│   │       ├── court.py        proceedings and convictions
+│   │       ├── masters.py      stations, officers, offence sections
+│   │       └── users.py
 └── docs/
+    └── superpowers/specs/
 ```
 
 ### 4.3 Data flow — filing a case
 
-1. User fills the File Case form (case fields + one or more offence sections from a
-   multi-select).
+1. User fills the File Case form (case fields plus a checkbox per offence section).
 2. `CaseRepository.file_case()` calls `CALL sp_file_case(...)` with the parameters.
 3. MySQL assigns `case_no`, inserts the case, inserts `case_offences` rows, and the
    triggers write the first status-history entry.
@@ -326,18 +362,20 @@ body and table content, 11px uppercase for field labels.
 
 ### 5.2 Shell
 
-A left sidebar (240px) lists the modules; the content area holds the active screen.
-The header shows the current module name, a global search box, the logged-in user with
-their role badge, and a theme toggle. Sidebar items are filtered by role.
+A left sidebar (236px) lists the modules; the content area holds the active screen.
+The header shows the current module name and subtitle, a theme toggle and a Refresh
+button. The sidebar footer shows the signed-in user, their role, and a Sign out button.
+Sidebar items are filtered by role, so an officer never sees the Administration group
+and a viewer sees no write controls at all.
 
 ### 5.3 Screens
 
 | screen | roles | contents |
 |---|---|---|
 | Login | — | username/password, error state, hint of the default admin |
-| Dashboard | all | KPI cards, 5 charts, recent cases table, overdue hearings |
+| Dashboard | all | 5 KPI cards, 4 charts, recent cases table, upcoming hearings |
 | Cases | all (viewer read-only) | searchable/filterable list, status filter chips, New Case button, row click → detail |
-| Case Detail | all | tabbed: Overview, Offences, Suspects, Victims, Witnesses, Evidence, Custody, Court, Conviction, History |
+| Case Detail | all | tabbed: Overview, Offences, Suspects, Victims, Witnesses, Evidence, Custody, Court, Conviction, History — each data tab carries an Add button for writers |
 | Suspects / Victims / Witnesses | all | master list per person type, linked back to case |
 | Evidence | all | evidence register with type and chain-of-custody filter |
 | Court | all | proceedings schedule + convictions list |
@@ -346,11 +384,11 @@ their role badge, and a theme toggle. Sidebar items are filtered by role.
 | Offence Sections | admin | CRUD for the law library |
 | Users | admin | CRUD for logins, role assignment, password reset |
 
-Every list screen is a reusable `DataTable` component: sortable headers, search box,
-column filters, double-click to open, right-click context menu, and an empty state.
+Every list screen is a reusable `DataTable` component: sortable headers, a search box, a
+row-count label, double-click to open the linked case, and an empty state.
 
 Every editable screen is a `FormPanel`: field grid with labels above inputs, required
-markers, inline validation, and Save / Reset buttons.
+markers, inline validation, and a Save / Cancel footer.
 
 ### 5.4 Role behaviour
 
@@ -362,22 +400,41 @@ markers, inline validation, and Save / Reset buttons.
 | Record arrests, court proceedings, convictions | yes | yes | no |
 | Manage stations, officers, offence sections | yes | no | no |
 | Manage users, reset passwords | yes | no | no |
-| Delete records | yes | soft-mark only | no |
+| Delete operational records (persons, evidence, custody, court) | yes | yes | no |
+| Delete a case | yes | no | no |
 
 Enforcement is two-layered: the UI hides or disables controls the role cannot use, and
 the repository layer re-checks the role before writing. The second layer is the one that
 actually protects the data.
+
+The repository layer works through a single `Repository` base class in `app/db/auth.py`.
+Every repository extends it and declares the roles allowed to write:
+
+| repository | write roles |
+|---|---|
+| `UserRepository`, `StationRepository`, `OfficerRepository`, `OffenceRepository` | admin only |
+| `CaseRepository`, `SuspectRepository`, `VictimRepository`, `WitnessRepository`, `EvidenceRepository`, `ArrestRepository`, `ProceedingRepository`, `ConvictionRepository` | admin, officer |
+
+Reads never check the role. Writes go through `Repository.execute` / `Repository.call`,
+which call `require_role` and raise `AccessDenied` before the statement is sent to
+MySQL. `CaseRepository.delete` additionally requires admin, because deleting a case
+removes its whole evidence trail.
+
+`Repositories` is constructed with the signed-in user, so every screen gets a
+repository bound to the actor: `Repositories(db, user)`.
 
 ---
 
 ## 6. Error handling and security
 
 - **DB errors:** every repository call is wrapped; `IntegrityError` is translated into a
-  message that names the constraint ("Station still has 4 open cases — reassign them
-  first") instead of a MySQL error string. Unexpected errors are logged with a traceback
-  to `logs/app.log` and shown to the user as a generic message.
-- **Connection loss:** the pool detects a dropped connection, reconnects once, and shows a
-  persistent "Reconnecting to MySQL" banner rather than crashing the app.
+  message that names the constraint ("That police station cannot be deleted while cases
+  still reference it.") instead of a MySQL error string. `SIGNAL SQLSTATE '45000'`
+  messages from procedures are passed through unchanged, because they are already written
+  for the user. Unexpected errors are logged to `logs/app.log` and shown as a toast.
+- **Connection loss:** the connection layer detects a dropped connection and
+  re-establishes it on the next query. If the server is unreachable at startup, the app
+  shows a "Cannot reach MySQL" card with Retry and Quit rather than a stack trace.
 - **Validation:** UI-level validation for required fields, formats and ranges, with the
   database `CHECK`/FK constraints as the backstop.
 - **Passwords:** PBKDF2-HMAC-SHA256 with a per-user random salt, 260 000 iterations,
@@ -393,7 +450,10 @@ actually protects the data.
 - `scripts/selftest.py` asserts the schema is correct and the stored procedures behave:
   filing a case assigns a sequential case number, an illegal status transition raises an
   error, a conviction flips the suspect and case status, and a delete is blocked by FK
-  restrict. Runs against a scratch database.
+  restrict. It also asserts the role layer: a viewer cannot write, and an officer cannot
+  edit master data. Runs against the database named in `config.ini`.
+- `python -m compileall app main.py scripts` and an import sweep over every module are
+  the smoke test that runs without a database.
 - Manual smoke path documented in the README: login → file a case → add offences,
   suspects, evidence → advance the status → record a court proceeding and conviction →
   watch the dashboard update.
@@ -416,9 +476,18 @@ Each phase ends with something runnable.
 
 ---
 
-## 9. Open items
+## 9. Reference data and open items
 
-- Reference data for offence sections and police stations needs real names for the demo
-  (the bootstrap insert ships a starter set of 8 stations and 24 BNS sections).
-- Whether to use a `case_no` counter table or a `SELECT MAX()` lookup — the counter table
-  is chosen for concurrency safety.
+- **Law library.** The `offence_sections.law_code` column is `ENUM('BNS','IPC')` so both
+  codes are supported. The seed ships **33 IPC sections** — the Bharatiya Nyaya Sanhita
+  numbering was still settling in the sources available at build time, and seeding a
+  section number that turns out to be wrong would be worse than seeding the code that is
+  verifiable. BNS rows are added from the Offence Sections screen like any other entry.
+- **Stations and officers.** The seed ships 8 stations and one officer per station, so the
+  officer pickers in the File Case and Evidence forms have something to offer from the
+  first run. Station names and districts are meant to be edited to match the local police
+  jurisdiction before a demo.
+- **Case numbering.** A dedicated `case_sequences` counter table is used rather than a
+  `SELECT MAX()` lookup, so two concurrent filings cannot collide on the same number.
+- **The default admin** (`admin` / `admin123`) is created by `scripts/setup_db.py` only
+  if no admin account exists. Change the password from the Users screen before any demo.
