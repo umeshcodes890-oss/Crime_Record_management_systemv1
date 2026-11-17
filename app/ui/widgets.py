@@ -415,7 +415,8 @@ class FormPanel(ctk.CTkFrame):
     """A two-column form with labelled fields and inline validation.
 
     Fields are added with ``add_entry`` / ``add_text`` / ``add_choice``
-    / ``add_date`` and read back with ``values()``.
+    / ``add_date`` and read back with ``values()``. ``add_block`` opens a
+    full-width section for anything the field builders do not cover.
     """
 
     def __init__(self, master, *, columns: int = 2, **kwargs) -> None:
@@ -428,53 +429,83 @@ class FormPanel(ctk.CTkFrame):
             self.grid_columnconfigure(index, weight=1)
 
     # -- building -----------------------------------------------------
-    def _place(self, widget: tk.Widget, label: str, required: bool) -> None:
+    def _holder(self, label: str, required: bool) -> ctk.CTkFrame:
+        """Open the next field cell and return the frame the widget goes in."""
         row, column = divmod(self._row, self._columns)
         self._row += 1
         holder = ctk.CTkFrame(self, fg_color="transparent")
         holder.grid(row=row, column=column, sticky="ew",
-                   padx=(0, PAD), pady=(0, PAD))
+                    padx=(0, PAD), pady=(0, PAD))
         holder.grid_columnconfigure(0, weight=1)
 
         text = f"{label} *" if required else label
         ctk.CTkLabel(
             holder, text=text, font=fonts().label, text_color=PALETTE.TEXT_MUTED, anchor="w",
         ).grid(row=0, column=0, sticky="w", pady=(0, 4))
+        return holder
+
+    def _attach(self, holder: ctk.CTkFrame, widget: tk.Widget) -> None:
         widget.grid(row=1, column=0, sticky="ew")
+
+    def add_block(self, label: str = "") -> ctk.CTkFrame:
+        """Open a full-width section and return the frame to build inside.
+
+        Skips to the next row so the block always spans every column.
+        """
+        remainder = self._row % self._columns
+        if remainder:
+            self._row += self._columns - remainder
+        row = self._row // self._columns
+        self._row += self._columns
+
+        holder = ctk.CTkFrame(self, fg_color="transparent")
+        holder.grid(row=row, column=0, columnspan=self._columns,
+                    sticky="ew", padx=(0, PAD), pady=(0, PAD))
+        holder.grid_columnconfigure(0, weight=1)
+
+        if label:
+            ctk.CTkLabel(
+                holder, text=label, font=fonts().label,
+                text_color=PALETTE.TEXT_MUTED, anchor="w",
+            ).grid(row=0, column=0, sticky="w", pady=(0, 4))
+        return holder
 
     def add_entry(self, key: str, label: str, *, placeholder: str = "",
                   required: bool = False, width: int = 0) -> ctk.CTkEntry:
+        holder = self._holder(label, required)
         entry = ctk.CTkEntry(
-            self, width=width or 0, height=36, placeholder_text=placeholder,
+            holder, width=width or 0, height=36, placeholder_text=placeholder,
             font=fonts().body, fg_color=PALETTE.SURFACE_ALT,
             border_color=PALETTE.BORDER, border_width=1,
         )
-        self._place(entry, label, required)
+        self._attach(holder, entry)
         self._fields[key] = entry
         return entry
 
     def add_text(self, key: str, label: str, *, height: int = 90,
                  placeholder: str = "", required: bool = False) -> ctk.CTkTextbox:
+        holder = self._holder(label, required)
         box = ctk.CTkTextbox(
-            self, height=height, font=fonts().body, fg_color=PALETTE.SURFACE_ALT,
+            holder, height=height, font=fonts().body, fg_color=PALETTE.SURFACE_ALT,
             border_color=PALETTE.BORDER, border_width=1, wrap="word",
         )
         if placeholder:
             box.insert("1.0", placeholder)
-        self._place(box, label, required)
+        self._attach(holder, box)
         self._fields[key] = box
         return box
 
     def add_choice(self, key: str, label: str, values: Sequence[str], *,
                    required: bool = False) -> ctk.CTkOptionMenu:
+        holder = self._holder(label, required)
         menu = ctk.CTkOptionMenu(
-            self, values=list(values), height=36, font=fonts().body,
+            holder, values=list(values), height=36, font=fonts().body,
             fg_color=PALETTE.SURFACE_ALT, button_color=PALETTE.SURFACE_HOVER,
             button_hover_color=PALETTE.BORDER, text_color=PALETTE.TEXT,
             dropdown_fg_color=PALETTE.SURFACE, dropdown_text_color=PALETTE.TEXT,
             dropdown_hover_color=PALETTE.SURFACE_HOVER, dropdown_font=fonts().body,
         )
-        self._place(menu, label, required)
+        self._attach(holder, menu)
         self._fields[key] = menu
         return menu
 

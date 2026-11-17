@@ -36,11 +36,11 @@ class FormDialog(ctk.CTkToplevel):
             header, text=title, font=fonts().subtitle, text_color=PALETTE.TEXT, anchor="w",
         ).pack(anchor="w")
 
-        body = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        body.grid(row=1, column=0, sticky="nsew", padx=(PAD_LG, PAD_LG - 6))
-        body.grid_columnconfigure(0, weight=1)
+        self.body = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self.body.grid(row=1, column=0, sticky="nsew", padx=(PAD_LG, PAD_LG - 6))
+        self.body.grid_columnconfigure(0, weight=1)
 
-        self.form = FormPanel(body, columns=2)
+        self.form = FormPanel(self.body, columns=2)
         self.form.grid(row=0, column=0, sticky="ew")
 
         footer = ctk.CTkFrame(self, fg_color="transparent")
@@ -64,6 +64,7 @@ class FormDialog(ctk.CTkToplevel):
         ).grid(row=0, column=2)
 
         self.after(50, self._centre)
+        self.after(120, self._sync_scrollbar)
 
     def _centre(self) -> None:
         self.update_idletasks()
@@ -71,6 +72,22 @@ class FormDialog(ctk.CTkToplevel):
         x = master.winfo_rootx() + (master.winfo_width() - self.winfo_width()) // 2
         y = master.winfo_rooty() + (master.winfo_height() - self.winfo_height()) // 3
         self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+
+    def _sync_scrollbar(self) -> None:
+        """Hide the body scrollbar when the form already fits.
+
+        CustomTkinter draws it whenever a scrollable frame exists, so a
+        short form ends up showing a bar that cannot move.
+        """
+        scrollbar = getattr(self.body, "_scrollbar", None)
+        canvas = getattr(self.body, "_parent_canvas", None)
+        if scrollbar is None or canvas is None:
+            return
+        top, bottom = canvas.yview()
+        if top <= 0.0 and bottom >= 1.0:
+            scrollbar.grid_remove()
+        else:
+            scrollbar.grid()
 
     def build(self, form: FormPanel) -> None:
         """Add the fields. Overridden by subclasses."""

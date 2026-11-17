@@ -51,7 +51,7 @@ class FileCaseDialog(FormDialog):
         self.user = user
         self._sections: list[dict] = []
         self._checks: dict[int, ctk.CTkCheckBox] = {}
-        super().__init__(master, "File a new case", size=(760, 720), save_text="File case")
+        super().__init__(master, "File a new case", size=(760, 782), save_text="File case")
 
     def build(self, form: FormPanel) -> None:
         stations = self.repos.stations.options()
@@ -68,20 +68,14 @@ class FileCaseDialog(FormDialog):
         form.add_datetime("occurrence", "Date and time of occurrence", required=True)
         form.add_datetime("reporting", "Date and time of reporting", required=True)
         form.add_entry("place", "Place of occurrence", placeholder="e.g. 14 Nehru Street")
-        form.add_text("description", "Description of the incident", height=110)
+        form.add_text("description", "Description of the incident", height=64)
 
         # offence sections with checkboxes
-        holder = ctk.CTkFrame(form, fg_color="transparent")
-        holder.grid(row=form._row, column=0, columnspan=2, sticky="ew", pady=(0, PAD))
-        holder.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            holder, text="Offence sections charged", font=fonts().label,
-            text_color=PALETTE.TEXT_MUTED, anchor="w",
-        ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+        holder = form.add_block("Offence sections charged")
 
         scroller = ctk.CTkScrollableFrame(holder, fg_color=PALETTE.SURFACE_ALT,
-                                           corner_radius=RADIUS, height=190)
-        scroller.grid(row=1, column=0, sticky="ew")
+                                           corner_radius=RADIUS, height=120)
+        scroller.grid(row=1, column=0, sticky="ew", pady=(0, PAD))
         scroller.grid_columnconfigure(0, weight=1)
 
         for index, section in enumerate(self._sections):
@@ -94,7 +88,6 @@ class FileCaseDialog(FormDialog):
             )
             check.grid(row=index, column=0, sticky="w", padx=PAD, pady=3)
             self._checks[section["section_id"]] = check
-        form._row += 1
 
     def collect(self) -> dict[str, Any]:
         values = super().collect()
@@ -146,27 +139,27 @@ class FileCaseDialog(FormDialog):
 # ----------------------------------------------------------------------
 class ChangeStatusDialog(FormDialog):
     def __init__(self, master, repos, user, case: dict) -> None:
+        super().__init__(master, f"Update status - {case['case_no']}",
+                         size=(520, 380), save_text="Update")
         self.repos = repos
         self.user = user
         self.case = case
-        self._options = next_statuses(case["status"])
-        super().__init__(master, f"Update status - {case['case_no']}",
-                         size=(520, 380), save_text="Update")
+        self._stages = next_statuses(case["status"])
 
     def build(self, form: FormPanel) -> None:
         form.add_choice("status", "New status",
-                        [status_label(option) for option in self._options] or ["No further stage"])
+                        [status_label(option) for option in self._stages] or ["No further stage"])
         form.add_entry("remark", "Remark", placeholder="Optional note for the history trail")
 
     def validate(self, values: dict[str, Any]) -> bool:
-        if not self._options:
+        if not self._stages:
             self.error.configure(text="This case is already closed.")
             return False
         return True
 
     def on_save(self, values: dict[str, Any]) -> None:
         label = values["status"]
-        target = next(option for option in self._options
+        target = next(option for option in self._stages
                       if status_label(option) == label)
         self.repos.cases.update_status(
             self.case["case_id"], target, self.user["user_id"], values.get("remark") or None
