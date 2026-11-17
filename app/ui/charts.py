@@ -10,7 +10,6 @@ import matplotlib
 
 matplotlib.use("TkAgg")
 
-import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
 from app.ui.widgets import PALETTE  # noqa: E402
@@ -33,7 +32,7 @@ def _style(fig: Figure, ax) -> None:
 def bar_chart(labels, values, title: str, colors=None, *, horizontal: bool = False,
               size: tuple[float, float] = (5.2, 2.9)):
     c = PALETTE.colors
-    fig = plt.figure(figsize=size, dpi=100)
+    fig = Figure(figsize=size, dpi=100)
     ax = fig.add_subplot(111)
     _style(fig, ax)
 
@@ -68,7 +67,7 @@ def bar_chart(labels, values, title: str, colors=None, *, horizontal: bool = Fal
 def donut_chart(labels, values, title: str, colors=None,
                 size: tuple[float, float] = (5.2, 2.9)):
     c = PALETTE.colors
-    fig = plt.figure(figsize=size, dpi=100)
+    fig = Figure(figsize=size, dpi=100)
     ax = fig.add_subplot(111)
     fig.patch.set_facecolor(c.SURFACE)
     ax.set_facecolor(c.SURFACE)
@@ -101,7 +100,7 @@ def donut_chart(labels, values, title: str, colors=None,
 def line_chart(labels, series: dict[str, list], title: str,
                size: tuple[float, float] = (5.2, 2.9)):
     c = PALETTE.colors
-    fig = plt.figure(figsize=size, dpi=100)
+    fig = Figure(figsize=size, dpi=100)
     ax = fig.add_subplot(111)
     _style(fig, ax)
 
