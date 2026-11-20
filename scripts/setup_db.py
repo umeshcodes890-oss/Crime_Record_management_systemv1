@@ -1,10 +1,14 @@
 """Create the crime_records database and apply every SQL file.
 
-    py scripts\\setup_db.py
+    python scripts\\setup_db.py
 
 Safe to run more than once: tables use CREATE TABLE IF NOT EXISTS,
 views use CREATE OR REPLACE, routines and triggers are dropped before
 being recreated, and reference rows use INSERT IGNORE.
+
+sql/schema.sql is the v1 baseline. The changes added since then live in
+sql/migrations and are applied afterwards by app/db/migrations.py, so an
+existing database can be brought forward without rebuilding it.
 """
 
 from __future__ import annotations
@@ -17,46 +21,14 @@ import mysql.connector
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.db.connection import ConfigError, load_config  # noqa: E402
+from app.db.connection import ConfigError, Database, DatabaseError, load_config  # noqa: E402
+from app.db.migrations import MigrationError, migrate, split_statements  # noqa: E402
 from app.db.passwords import hash_password  # noqa: E402
 
 SQL_DIR = PROJECT_ROOT / "sql"
 
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "admin123"
-
-
-def split_statements(script: str) -> list[str]:
-    """Split a SQL script into individual statements, honouring DELIMITER."""
-    statements: list[str] = []
-    delimiter = ";"
-    buffer: list[str] = []
-
-    def flush() -> None:
-        nonlocal buffer
-        text = "\n".join(buffer).strip()
-        buffer = []
-        if text:
-            statements.append(text)
-
-    for raw_line in script.splitlines():
-        stripped = raw_line.strip()
-
-        if stripped.upper().startswith("DELIMITER "):
-            flush()
-            delimiter = stripped.split(None, 1)[1].strip()
-            continue
-
-        if not stripped or stripped.startswith("--"):
-            continue
-
-        buffer.append(raw_line)
-        if stripped.endswith(delimiter):
-            buffer[-1] = stripped[: -len(delimiter)].rstrip()
-            flush()
-
-    flush()
-    return statements
 
 
 def apply_file(cursor, path: Path) -> int:
@@ -123,6 +95,13 @@ def main() -> int:
 
         created = ensure_admin_user(cursor)
 
+        print(f"Applying migrations to '{db_name}' ...")
+        migration_db = Database(config)
+        try:
+            migrate(migration_db)
+        finally:
+            migration_db.close()
+
         cursor.execute("SELECT COUNT(*) FROM crime_cases")
         case_count = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM offence_sections")
@@ -143,8 +122,11 @@ def main() -> int:
             print()
             print("  Admin account already exists; its password was left unchanged.")
         print()
-        print("Start the application with:  py main.py")
+        print("Start the application with:  python main.py")
         return 0
+    except (DatabaseError, MigrationError) as exc:
+        print(f"[x] Setup failed: {exc}")
+        return 1
     except mysql.connector.Error as exc:
         print(f"[x] Setup failed: {exc}")
         return 1

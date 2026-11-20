@@ -116,17 +116,23 @@ BEGIN
 END $$
 
 -- ---------------------------------------------------------------------
--- trg_evidence_after_insert : stamp chain of custody when it is missing
+-- trg_evidence_before_custody : stamp chain of custody when it is missing
+--
+-- This used to be an AFTER INSERT trigger that ran UPDATE evidence on
+-- the row it had just inserted. MySQL rejects that with error 1442 - a
+-- trigger cannot touch the table whose statement fired it - so recording
+-- evidence with an empty chain of custody date failed every time. Setting
+-- NEW.chain_of_custody_datetime before the row is written does the same
+-- job, and BEFORE INSERT is the only place it can be done.
 -- ---------------------------------------------------------------------
 DROP TRIGGER IF EXISTS trg_evidence_after_insert $$
-CREATE TRIGGER trg_evidence_after_insert
-AFTER INSERT ON evidence
+DROP TRIGGER IF EXISTS trg_evidence_before_custody $$
+CREATE TRIGGER trg_evidence_before_custody
+BEFORE INSERT ON evidence
 FOR EACH ROW
 BEGIN
     IF NEW.chain_of_custody_datetime IS NULL THEN
-        UPDATE evidence
-           SET chain_of_custody_datetime = NEW.collected_datetime
-         WHERE evidence_id = NEW.evidence_id;
+        SET NEW.chain_of_custody_datetime = COALESCE(NEW.collected_datetime, NOW());
     END IF;
 END $$
 

@@ -1,20 +1,23 @@
 """Schema and stored procedure checks.
 
-    py scripts\\selftest.py
+    python scripts\\selftest.py
+    python scripts\\selftest.py --db crime_records_migtest
 
-Runs against the database named in config.ini. Every check creates its
-own records and removes them again, so it is safe to run repeatedly.
+Runs against the database named in config.ini, or against --db when you
+want to test a copy. Every check creates its own records and removes them
+again, so it is safe to run repeatedly.
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.db.connection import Database, DatabaseError  # noqa: E402
+from app.db.connection import Database, DatabaseError, load_config  # noqa: E402
 from app.db.passwords import hash_password, verify_password  # noqa: E402
 from app.db.repositories import Repositories  # noqa: E402
 
@@ -37,7 +40,7 @@ EXPECTED_TRIGGERS = [
     "trg_cases_before_insert", "trg_cases_after_insert",
     "trg_cases_after_status_update", "trg_suspects_after_arrest",
     "trg_suspects_after_conviction", "trg_case_offences_after_insert",
-    "trg_case_offences_after_delete", "trg_evidence_after_insert",
+    "trg_case_offences_after_delete", "trg_evidence_before_custody",
 ]
 
 PASSED = 0
@@ -202,6 +205,13 @@ def check_behaviour(db: Database, actor: dict) -> None:
           suspect["status"])
     check("closed case carries a close date", case["closed_datetime"] is not None)
 
+    evidence_id = repos.evidence.create(case_id, "physical", "Self test evidence",
+                                        officer["officer_id"], "2026-02-05 11:00:00")
+    item = db.query_one(
+        "SELECT chain_of_custody_datetime FROM evidence WHERE evidence_id = %s", (evidence_id,))
+    check("evidence recorded without a custody date is given one",
+          item is not None and item["chain_of_custody_datetime"] is not None, str(item))
+
     restricted = False
     try:
         db.execute("DELETE FROM police_stations WHERE station_id = %s",
@@ -242,7 +252,16 @@ def check_behaviour(db: Database, actor: dict) -> None:
 
 
 def main() -> int:
-    db = Database()
+    parser = argparse.ArgumentParser(description="Self test the Crime Record System database.")
+    parser.add_argument("--db", metavar="SCHEMA",
+                        help="test this schema instead of the database in config.ini")
+    args = parser.parse_args()
+
+    config = load_config()
+    if args.db:
+        config["database"]["database"] = args.db
+
+    db = Database(config)
     print(f"Testing {db.config['database'].get('database')}\n")
     try:
         check_schema(db)
