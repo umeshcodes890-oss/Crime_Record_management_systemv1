@@ -25,6 +25,12 @@ EXPECTED_TABLES = [
     "police_stations", "officers", "offence_sections", "users", "crime_cases",
     "case_offences", "case_status_history", "suspects", "victims", "witnesses",
     "evidence", "arrests", "court_proceedings", "convictions",
+    # what each record carries alongside it
+    "victim_medical_records", "victim_contacts", "victim_compensation",
+    "witness_statements", "witness_interviews", "witness_protection",
+    "evidence_attachments", "evidence_custody_log", "forensic_examinations",
+    # the machinery the migrations and the log depend on
+    "case_sequences", "evidence_sequences", "audit_log", "schema_migrations",
 ]
 EXPECTED_VIEWS = [
     "v_case_overview", "v_officer_workload", "v_station_statistics",
@@ -35,12 +41,18 @@ EXPECTED_PROCEDURES = [
     "sp_file_case", "sp_update_case_status", "sp_assign_officer",
     "sp_search_cases", "sp_record_arrest", "sp_record_conviction",
     "sp_dashboard_summary",
+    # a migration cannot ask whether a column is already there, so it asks these
+    "sp_add_column", "sp_modify_column", "sp_add_index",
 ]
 EXPECTED_TRIGGERS = [
     "trg_cases_before_insert", "trg_cases_after_insert",
     "trg_cases_after_status_update", "trg_suspects_after_arrest",
     "trg_suspects_after_conviction", "trg_case_offences_after_insert",
     "trg_case_offences_after_delete", "trg_evidence_before_custody",
+    # an entry once written stays written
+    "trg_audit_log_before_update", "trg_audit_log_before_delete",
+    "trg_custody_log_before_update", "trg_custody_log_before_delete",
+    "trg_evidence_before_insert",
 ]
 
 PASSED = 0

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 import customtkinter as ctk
 
@@ -19,6 +19,7 @@ from app.ui.widgets import (
     DataTable,
     FormPanel,
     StatusPill,
+    clip,
     toast,
 )
 
@@ -518,6 +519,7 @@ class CaseDetailView(BaseView):
         self.history_tab = self.tabs.add("History")
 
         self.case: dict = {}
+        self._tables: dict[str, DataTable] = {}
 
     # ------------------------------------------------------------------
     def reload(self) -> None:
@@ -551,7 +553,8 @@ class CaseDetailView(BaseView):
 
     def _table_host(self, tab, title: str, columns: list[Column],
                     *, on_add=None, add_text: str = "Add", height: int = 340,
-                    on_delete=None):
+                    on_delete=None, on_row_double=None,
+                    actions: list[tuple[str, Callable[[], None]]] | None = None):
         for child in tab.winfo_children():
             child.destroy()
         tab.grid_columnconfigure(0, weight=1)
@@ -571,8 +574,19 @@ class CaseDetailView(BaseView):
             ).grid(row=0, column=1, sticky="e")
 
         table = DataTable(tab, columns, title="", searchable=True, height=height,
-                          on_delete=on_delete)
+                          on_delete=on_delete, on_row_double=on_row_double)
         table.grid(row=1, column=0, sticky="nsew", padx=(PAD, PAD), pady=(0, PAD))
+        self._tables[title] = table
+
+        # The buttons act on the highlighted row, so they are built once the
+        # table they read from exists.
+        for offset, (text, command) in enumerate(actions or []):
+            ctk.CTkButton(
+                bar, text=text, width=110, height=32, font=fonts().small,
+                fg_color="transparent", border_width=1, border_color=PALETTE.BORDER,
+                text_color=PALETTE.TEXT_MUTED, hover_color=PALETTE.SURFACE_HOVER,
+                command=command,
+            ).grid(row=0, column=2 + offset, sticky="e", padx=(PAD_SM, 0))
         return table
 
     def _fill_overview(self) -> None:
@@ -644,6 +658,8 @@ class CaseDetailView(BaseView):
         table = self._table_host(
             self.suspects_tab, "Suspects",
             [
+                Column("is_prime", "Prime", 80, anchor="center",
+                       render=lambda row: "Prime" if row.get("is_prime") else "-"),
                 Column("name", "Name", 180),
                 Column("alias", "Alias", 120),
                 Column("gender", "Gender", 90),
@@ -652,6 +668,8 @@ class CaseDetailView(BaseView):
                 Column("conviction_count", "Convictions", 100, anchor="center"),
             ],
             on_add=self._add_action(self._add_suspect),
+            actions=self._prime_actions("Suspects", self.repos.suspects,
+                                        "suspect_id", "suspect"),
             on_delete=self._delete_action(lambda row: self.delete_record(
                 f"Suspect '{row['name']}'",
                 lambda: self.repos.suspects.delete(row["suspect_id"]),
@@ -663,13 +681,21 @@ class CaseDetailView(BaseView):
         table = self._table_host(
             self.victims_tab, "Victims",
             [
+                Column("is_prime", "Prime", 80, anchor="center",
+                       render=lambda row: "Prime" if row.get("is_prime") else "-"),
                 Column("name", "Name", 180),
                 Column("age", "Age", 70, anchor="center"),
                 Column("gender", "Gender", 90),
                 Column("injury_level", "Injury", 130),
+                Column("medical_assistance_status", "Medical help", 130),
                 Column("phone", "Phone", 130),
+                Column("confidentiality_level", "Confidentiality", 140),
             ],
             on_add=self._add_action(self._add_victim),
+            actions=self._prime_actions("Victims", self.repos.victims,
+                                        "victim_id", "victim"),
+            on_row_double=lambda row: self.app.navigate(
+                "victims", victim_id=row["victim_id"]),
             on_delete=self._delete_action(lambda row: self.delete_record(
                 f"Victim '{row['name']}'",
                 lambda: self.repos.victims.delete(row["victim_id"]),
@@ -682,12 +708,17 @@ class CaseDetailView(BaseView):
             self.witnesses_tab, "Witnesses",
             [
                 Column("name", "Name", 180),
+                Column("witness_type", "Type", 120),
+                Column("availability_status", "Available", 120),
+                Column("protection_required", "Protection", 100, anchor="center",
+                       render=lambda row: "Ordered" if row.get("protection_required") else "-"),
                 Column("phone", "Phone", 130),
-                Column("is_reliable", "Reliable", 90, anchor="center",
-                       render=lambda row: "Yes" if row.get("is_reliable") else "No"),
-                Column("statement", "Statement", 420),
+                Column("statement", "Account", 320,
+                       render=lambda row: clip(row.get("statement"))),
             ],
             on_add=self._add_action(self._add_witness),
+            on_row_double=lambda row: self.app.navigate(
+                "witnesses", witness_id=row["witness_id"]),
             on_delete=self._delete_action(lambda row: self.delete_record(
                 f"Witness '{row['name']}'",
                 lambda: self.repos.witnesses.delete(row["witness_id"]),
@@ -699,14 +730,23 @@ class CaseDetailView(BaseView):
         table = self._table_host(
             self.evidence_tab, "Evidence register",
             [
-                Column("type", "Type", 120),
-                Column("description", "Description", 300),
+                Column("is_prime", "Prime", 80, anchor="center",
+                       render=lambda row: "Prime" if row.get("is_prime") else "-"),
+                Column("evidence_ref", "Ref", 130),
+                Column("item_name", "Item", 170),
+                Column("type", "Type", 110),
+                Column("evidence_status", "State", 130),
                 Column("collected_by_name", "Collected by", 160),
                 Column("collected_datetime", "Collected", 150),
-                Column("chain_of_custody_datetime", "Chain of custody", 150),
                 Column("storage_location", "Storage", 140),
+                Column("description", "Description", 260,
+                       render=lambda row: clip(row.get("description"))),
             ],
             on_add=self._add_action(self._add_evidence),
+            actions=self._prime_actions("Evidence register", self.repos.evidence,
+                                        "evidence_id", "evidence item"),
+            on_row_double=lambda row: self.app.navigate(
+                "evidence", evidence_id=row["evidence_id"]),
             on_delete=self._delete_action(lambda row: self.delete_record(
                 f"Evidence '{row['description']}'",
                 lambda: self.repos.evidence.delete(row["evidence_id"]),
@@ -804,6 +844,40 @@ class CaseDetailView(BaseView):
     def _delete_action(self, action):
         """Only writers get a delete button on the child tables."""
         return action if self.can_write() else None
+
+    def _prime_actions(self, title: str, repo, key_column: str, what: str):
+        """The mark and un-mark buttons for one register, for writers only.
+
+        Which record a case treats as its main one is a decision somebody
+        makes here; nothing in the system draws it from a date or a status.
+        """
+        if not self.can_write():
+            return []
+        return [
+            ("Mark prime", lambda: self._set_prime(title, repo, key_column, what, True)),
+            ("Clear prime", lambda: self._set_prime(title, repo, key_column, what, False)),
+        ]
+
+    def _set_prime(self, title: str, repo, key_column: str, what: str,
+                   prime: bool) -> None:
+        table = self._tables.get(title)
+        row = table.selected_row if table is not None else None
+        if row is None:
+            self.app.toast(f"Select the {what} you mean.", "error")
+            return
+        try:
+            if prime:
+                repo.mark_prime(row[key_column])
+            else:
+                repo.clear_prime(row[key_column])
+        except DatabaseError as exc:
+            self.app.toast(str(exc), "error", 6500)
+            return
+        name = row.get("name") or row.get("item_name") or "That record"
+        self.app.toast(
+            f"{name} is {'now' if prime else 'no longer'}"
+            f" the prime {what} of this case.", "success")
+        self.reload()
 
     def _add_offence(self) -> None:
         if AddOffenceDialog(self.app, self.repos, self.case_id).show():

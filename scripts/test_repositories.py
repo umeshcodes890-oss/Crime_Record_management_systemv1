@@ -1012,6 +1012,150 @@ def test_an_attachment_is_validated_hashed_and_kept(fx: Fixtures) -> None:
               == [a["sha256"] for a in evidence.attachments(item_id)])
 
 
+# ---------------------------------------------------------------------
+# The prime record of a case
+# ---------------------------------------------------------------------
+def _prime_ids(fx: Fixtures, table: str, key_column: str) -> list[int]:
+    """Which records of one kind on the test's case hold the mark."""
+    rows = fx.db.query(
+        f"SELECT {key_column} AS id FROM {table}"
+        " WHERE case_id = %s AND is_prime = TRUE", (fx.case_id,))
+    return sorted(row["id"] for row in rows)
+
+
+def test_the_prime_record_is_the_only_one_on_its_case(fx: Fixtures) -> None:
+    """Naming the main one releases whichever of them held the mark before."""
+    print("Prime records")
+    suspects, victims, evidence = fx.repos.suspects, fx.repos.victims, fx.repos.evidence
+
+    first = suspects.create(fx.case_id, "Prime Candidate")
+    check("a new suspect is not the prime one", not suspects.get(first)["is_prime"])
+    second = suspects.create(fx.case_id, "Second Candidate")
+
+    suspects.mark_prime(first)
+    check("a suspect can be named the main one", bool(suspects.get(first)["is_prime"]))
+    check("the decision is attributed in the trail",
+          fx.audit_for("suspect", first, "status_change") is not None)
+
+    suspects.mark_prime(second)
+    check("the suspect marked before it gives the mark up",
+          not suspects.get(first)["is_prime"])
+    check("the case is left with one prime suspect",
+          _prime_ids(fx, "suspects", "suspect_id") == [second],
+          str(_prime_ids(fx, "suspects", "suspect_id")))
+    check("the case screen can see which one it is",
+          [row["is_prime"] for row in sorted(suspects.for_case(fx.case_id),
+                                             key=lambda r: r["suspect_id"])]
+          == [False, True], str(suspects.for_case(fx.case_id)))
+
+    victim_first = victims.create(fx.case_id, "Prime Candidate")
+    victim_second = victims.create(fx.case_id, "Second Candidate")
+    victims.mark_prime(victim_first)
+    victims.mark_prime(victim_second)
+    check("the case is left with one prime victim",
+          _prime_ids(fx, "victims", "victim_id") == [victim_second],
+          str(_prime_ids(fx, "victims", "victim_id")))
+    check("a suspect does not use up the victim's mark",
+          _prime_ids(fx, "suspects", "suspect_id") == [second])
+
+    item_one = _item(fx, item_name="Prime Candidate")
+    item_two = _item(fx, item_name="Second Candidate")
+    evidence.mark_prime(item_one)
+    evidence.clear_prime(item_one)
+    check("the mark can be put back",
+          not evidence.get(item_one)["is_prime"]
+          and _prime_ids(fx, "evidence", "evidence_id") == [])
+    evidence.mark_prime(item_two)
+    check("the case is left with one prime exhibit",
+          _prime_ids(fx, "evidence", "evidence_id") == [item_two],
+          str(_prime_ids(fx, "evidence", "evidence_id")))
+    entry = fx.audit_for("evidence", item_two, "status_change")
+    check("the trail says what was decided",
+          entry is not None and "prime" in (entry["summary"] or "").lower(), str(entry))
+
+    untouched = suspects.create(fx.case_id, "Never Prime")
+    suspects.clear_prime(untouched)
+    suspects.mark_prime(second)
+    check("a mark that changes nothing leaves nothing in the trail",
+          fx.audit_count("suspect", untouched, "status_change") == 0
+          and fx.audit_count("suspect", second, "status_change") == 1,
+          f"{fx.audit_count('suspect', untouched, 'status_change')} and "
+          f"{fx.audit_count('suspect', second, 'status_change')} entries")
+
+
+def test_marking_a_prime_releases_only_the_records_on_that_case(fx: Fixtures) -> None:
+    print("Prime scope")
+    suspects = fx.repos.suspects
+    here = suspects.create(fx.case_id, "This Case Suspect")
+    other = fx.repos.cases.file_case(
+        station_id=fx.station["station_id"], officer_id=fx.officer["officer_id"],
+        user_id=fx.actor["user_id"], category="theft", offence_type="Repository test",
+        occurrence_datetime="2026-04-02 10:00:00",
+        reporting_datetime="2026-04-02 12:00:00",
+        place_of_occurrence="Another address",
+        description="The second case created by the repository test.",
+        section_ids=fx.section_ids,
+    )["case_id"]
+    try:
+        there = suspects.create(other, "Other Case Suspect")
+        suspects.mark_prime(here)
+        suspects.mark_prime(there)
+        check("each case keeps its own prime suspect",
+              bool(suspects.get(here)["is_prime"])
+              and bool(suspects.get(there)["is_prime"]))
+    finally:
+        fx.db.execute("DELETE FROM crime_cases WHERE case_id = %s", (other,))
+
+
+def test_a_failed_prime_change_leaves_the_previous_one_in_place(fx: Fixtures) -> None:
+    """The mark, the released sibling and the trail entry are one unit."""
+    print("Prime atomicity")
+    suspects = fx.repos.suspects
+    holder = suspects.create(fx.case_id, "Holding Prime")
+    challenger = suspects.create(fx.case_id, "Failed Challenger")
+    suspects.mark_prime(holder)
+
+    ghost = Repositories(fx.db, {"user_id": 999999, "username": "ghost", "role": "admin"})
+    refused("a change that cannot be attributed to a user is refused",
+            lambda: ghost.suspects.mark_prime(challenger), DatabaseError)
+    check("the previous prime still holds the mark",
+          bool(suspects.get(holder)["is_prime"]))
+    check("the challenger is back to not holding it",
+          not suspects.get(challenger)["is_prime"])
+    check("and no audit entry claims a change that did not happen",
+          fx.audit_count("suspect", challenger, "status_change") == 0)
+
+
+def test_a_viewer_cannot_move_the_prime_record(fx: Fixtures) -> None:
+    print("Prime access")
+    suspects = fx.repos.suspects
+    suspect_id = suspects.create(fx.case_id, "Viewer Tested Suspect")
+    as_viewer = fx.repos_as("viewer").suspects
+
+    refused("a viewer cannot name a prime suspect",
+            lambda: as_viewer.mark_prime(suspect_id))
+    refused("a viewer cannot release one either",
+            lambda: as_viewer.clear_prime(suspect_id))
+    check("the record is left as it was", not suspects.get(suspect_id)["is_prime"])
+
+
+def test_the_prime_flag_is_not_an_ordinary_profile_field(fx: Fixtures) -> None:
+    """Only the deliberate act moves it, never a form that happens to carry it."""
+    print("Prime flag")
+    victim_id = fx.repos.victims.create(fx.case_id, "Profile Written Victim")
+    item_id = _item(fx, item_name="Profile Written Item")
+    refused("a victim profile write cannot set the mark",
+            lambda: fx.repos.victims.update(victim_id, is_prime=True), DatabaseError)
+    refused("an evidence profile write cannot set the mark",
+            lambda: fx.repos.evidence.update(item_id, is_prime=True), DatabaseError)
+
+    suspect_id = fx.repos.suspects.create(fx.case_id, "Profile Written Suspect")
+    fx.repos.suspects.update(suspect_id, status="arrested", is_prime=True)
+    after = fx.repos.suspects.get(suspect_id)
+    check("a suspect profile write moves the status it knows, not the mark",
+          after["status"] == "arrested" and not after["is_prime"], str(after))
+
+
 TESTS = [
     test_transaction_rolls_back_on_failure,    test_transaction_commits_on_success,
     test_transaction_rolls_back_when_the_database_rejects_a_later_write,
@@ -1042,6 +1186,11 @@ TESTS = [
     test_a_failed_custody_update_leaves_no_entry_behind,
     test_forensic_examinations_are_sent_and_reported,
     test_an_attachment_is_validated_hashed_and_kept,
+    test_the_prime_record_is_the_only_one_on_its_case,
+    test_marking_a_prime_releases_only_the_records_on_that_case,
+    test_a_failed_prime_change_leaves_the_previous_one_in_place,
+    test_a_viewer_cannot_move_the_prime_record,
+    test_the_prime_flag_is_not_an_ordinary_profile_field,
 ]
 
 

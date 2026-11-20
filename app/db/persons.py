@@ -13,6 +13,11 @@ from app.db.privacy import (
 
 
 class SuspectRepository(Repository):
+    """The suspect register. One suspect of a case can be the prime one."""
+
+    prime_table, prime_key = "suspects", "suspect_id"
+    prime_entity, prime_word = "suspect", "prime suspect"
+
     def __init__(self, db: Database, actor: dict | None = None) -> None:
         super().__init__(db, actor)
 
@@ -121,6 +126,9 @@ VICTIM_COMPENSATION_FIELDS = frozenset({
 
 class VictimRepository(Repository):
     """The victim register, plus the medical, contact and compensation records."""
+
+    prime_table, prime_key = "victims", "victim_id"
+    prime_entity, prime_word = "victim", "prime victim"
 
     def __init__(self, db: Database, actor: dict | None = None) -> None:
         super().__init__(db, actor)

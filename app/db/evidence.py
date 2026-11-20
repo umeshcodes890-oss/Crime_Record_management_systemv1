@@ -56,6 +56,9 @@ CUSTODY_FIELDS = frozenset({
 class EvidenceRepository(Repository):
     """The evidence register, its custody chain, forensics and attachments."""
 
+    prime_table, prime_key = "evidence", "evidence_id"
+    prime_entity, prime_word = "evidence", "prime evidence item"
+
     def __init__(self, db: Database, actor: dict | None = None, *,
                  files_dir: str | Path | None = None,
                  allowed_extensions: frozenset[str] = storage.ALLOWED_EXTENSIONS,
@@ -64,6 +67,11 @@ class EvidenceRepository(Repository):
         self.files_dir = storage.evidence_root(files_dir)
         self.allowed_extensions = allowed_extensions
         self.max_file_bytes = max_file_bytes
+
+    def prime_label(self, row: dict) -> str:
+        """An item is named after what it is, or by its reference."""
+        return str(row.get("item_name") or row.get("evidence_ref")
+                   or row.get("description") or "An exhibit")
 
     # -- reading ------------------------------------------------------
     def for_case(self, case_id: int) -> list[dict]:

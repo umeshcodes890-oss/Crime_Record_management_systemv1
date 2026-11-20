@@ -98,6 +98,51 @@ class PaletteSet:
             "grave": c.DANGER,
         }
 
+    @property
+    def injury(self) -> dict[str, str]:
+        c = self.colors
+        return {
+            "none": c.TEXT_MUTED,
+            "minor": c.SUCCESS,
+            "moderate": c.WARNING,
+            "grievous": "#d07a3c",
+            "fatal": c.DANGER,
+        }
+
+    @property
+    def confidentiality(self) -> dict[str, str]:
+        c = self.colors
+        return {
+            "public": c.TEXT_MUTED,
+            "internal": c.INFO,
+            "confidential": c.WARNING,
+            "restricted": c.DANGER,
+        }
+
+    @property
+    def evidence_status(self) -> dict[str, str]:
+        c = self.colors
+        return {
+            "seized": c.INFO,
+            "sealed": c.VIOLET,
+            "in_store": c.SUCCESS,
+            "issued_to_court": c.WARNING,
+            "under_examination": "#d07a3c",
+            "returned": c.TEXT_MUTED,
+            "destroyed": c.DANGER,
+        }
+
+    @property
+    def forensic_status(self) -> dict[str, str]:
+        c = self.colors
+        return {
+            "not_required": c.TEXT_MUTED,
+            "pending": c.INFO,
+            "sent": c.WARNING,
+            "under_examination": "#d07a3c",
+            "reported": c.SUCCESS,
+        }
+
 
 class Fonts:
     """Application fonts. Created once, after the Tk root exists."""

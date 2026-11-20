@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from tkinter import ttk
 from typing import Any, Callable, Sequence
 
@@ -565,6 +565,67 @@ class FormPanel(ctk.CTkFrame):
             if isinstance(key, str) and isinstance(widget, (ctk.CTkEntry, ctk.CTkOptionMenu)):
                 widget.configure(border_color=PALETTE.BORDER)
         return True
+
+
+def as_form_values(record: dict, *, yes_no: Sequence[str] = ()) -> dict:
+    """A record spelled the way a form wants it.
+
+    A form shows a blank for a value that is not there and spells a tick
+    box Yes or No. Timestamps lose the seconds, because the entry asks
+    for ``YYYY-MM-DD HH:MM``.
+    """
+    flags = set(yes_no)
+    values: dict[str, Any] = {}
+    for key, value in record.items():
+        if key in flags:
+            values[key] = "Yes" if value else "No"
+        elif isinstance(value, datetime):
+            values[key] = value.strftime("%Y-%m-%d %H:%M")
+        elif isinstance(value, date):
+            values[key] = value.strftime("%Y-%m-%d")
+        elif value is None:
+            values[key] = ""
+        else:
+            values[key] = str(value)
+    return values
+
+
+def as_bools(values: dict, *keys: str) -> dict:
+    """Turn the Yes/No choices of a form back into what MySQL stores."""
+    for key in keys:
+        if key in values:
+            values[key] = values[key] == "Yes"
+    return values
+
+
+def clip(text: Any, length: int = 90) -> str:
+    """One line of a long field, so a table row stays one row high.
+
+    The whole text is a double-click away on the screen that shows it.
+    """
+    words = " ".join(str(text or "").split())
+    return words if len(words) <= length else words[:length - 3] + "..."
+
+
+# ----------------------------------------------------------------------
+# Registers
+# ----------------------------------------------------------------------
+def filter_menu(parent, values: Sequence[str], *, on_change: Callable[[], None],
+                width: int = 170) -> ctk.CTkOptionMenu:
+    """A dropdown that narrows a register.
+
+    The first value is the one that means "everything", so a screen only
+    has to list the choices it offers.
+    """
+    menu = ctk.CTkOptionMenu(
+        parent, values=list(values), width=width, height=36, font=fonts().body,
+        fg_color=PALETTE.SURFACE_ALT, button_color=PALETTE.SURFACE_HOVER,
+        button_hover_color=PALETTE.BORDER, text_color=PALETTE.TEXT,
+        dropdown_fg_color=PALETTE.SURFACE, dropdown_text_color=PALETTE.TEXT,
+        dropdown_hover_color=PALETTE.SURFACE_HOVER,
+    )
+    menu.configure(command=lambda _value: on_change())
+    return menu
 
 
 # ----------------------------------------------------------------------

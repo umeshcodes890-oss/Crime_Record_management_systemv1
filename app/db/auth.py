@@ -37,6 +37,14 @@ class Repository:
 
     write_roles: tuple[str, ...] = (ROLE_ADMIN, ROLE_OFFICER)
 
+    # The repositories whose records a case can have one prime of. They
+    # name the table, its primary key, the entity as the audit trail
+    # calls it, and what the mark is worth in words.
+    prime_table: str | None = None
+    prime_key: str | None = None
+    prime_entity: str = ""
+    prime_word: str = ""
+
     def __init__(self, db: Database, actor: dict | None = None) -> None:
         self.db = db
         self.actor = actor
@@ -147,6 +155,60 @@ class Repository:
         with self.db.transaction():
             self.execute(f"DELETE FROM {table} WHERE {key_column} = %s", (key_value,))
             self.log(entity, key_value, "delete", summary, case_id=case_id)
+
+    # -- the prime record of a case ------------------------------
+    def mark_prime(self, record_id: int) -> None:
+        """Name one record the prime one for its case."""
+        self.set_prime(record_id, True)
+
+    def clear_prime(self, record_id: int) -> None:
+        """Take the mark back off a record."""
+        self.set_prime(record_id, False)
+
+    def set_prime(self, record_id: int, prime: bool) -> None:
+        """Move the mark, releasing whichever record of the case held it.
+
+        A decision a person makes, and one they can put back: nothing
+        here infers it from a date, a status or a sort order. Releasing
+        the others, setting this one and writing the trail entry are one
+        transaction, so a failed write leaves the previous prime in place
+        rather than a case with none.
+
+        The siblings go first because the database only allows one primed
+        record per case; setting the new mark before clearing the old one
+        would be refused as a duplicate.
+
+        The role is asked before the flag is read: being told "nothing
+        would change" is not the same as being allowed to change it.
+        """
+        self.require(*self.write_roles)
+        if self.prime_table is None or self.prime_key is None:
+            raise DatabaseError(
+                f"A {self.prime_entity or 'record'} cannot be marked prime.")
+        row = self.db.query_one(
+            f"SELECT * FROM {self.prime_table} WHERE {self.prime_key} = %s",
+            (record_id,))
+        if row is None:
+            raise DatabaseError(f"That {self.prime_entity} is no longer on file.")
+        if bool(row.get("is_prime")) == bool(prime):
+            return
+        label = self.prime_label(row)
+        with self.db.transaction():
+            self.execute(
+                f"UPDATE {self.prime_table} SET is_prime = FALSE WHERE case_id = %s",
+                (row["case_id"],))
+            if prime:
+                self.execute(
+                    f"UPDATE {self.prime_table} SET is_prime = TRUE"
+                    f" WHERE {self.prime_key} = %s", (record_id,))
+            self.log(self.prime_entity, record_id, "status_change",
+                     f"{label} {'is now' if prime else 'is no longer'}"
+                     f" the {self.prime_word} of this case",
+                     case_id=row["case_id"])
+
+    def prime_label(self, row: dict) -> str:
+        """How a record is named in the trail entry."""
+        return str(row.get("name") or f"{self.prime_entity} #{row.get(self.prime_key)}")
 
     # -- statement helpers -------------------------------------------
     @staticmethod
