@@ -17,6 +17,11 @@ venv/
 # Runtime
 logs/
 
+# Filed evidence copies. The database keeps the path and the hash; the
+# bytes are photographs, statements and clips from real cases and belong
+# on the station machine, not in a repository.
+evidence_files/
+
 # OS
 Thumbs.db
 desktop.ini

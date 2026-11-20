@@ -11,8 +11,9 @@ from __future__ import annotations
 import configparser
 import logging
 import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Iterator, Sequence
 
 import mysql.connector
 from mysql.connector import Error as MySQLError
@@ -78,6 +79,7 @@ class Database:
         self.config = config or load_config()
         self._lock = threading.RLock()
         self._conn: Any = None
+        self._depth = 0
         if connect:
             self.connect()
 
@@ -208,6 +210,41 @@ class Database:
                 raise self._translate(exc) from exc
             finally:
                 cursor.close()
+
+    # ------------------------------------------------------------------
+    # transactions
+    # ------------------------------------------------------------------
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Group writes so that they commit together, or not at all.
+
+        The connection runs with autocommit switched on, so a repository
+        that has to satisfy a multi-table rule wraps those writes in this
+        block: they are committed when the block ends cleanly and rolled
+        back if anything inside raises.
+        """
+        with self._lock:
+            if self._depth:
+                # Already inside a transaction: join it. The outermost
+                # block decides whether the writes are committed.
+                self._depth += 1
+                try:
+                    yield
+                finally:
+                    self._depth -= 1
+                return
+            connection = self._connection()
+            connection.autocommit = False
+            self._depth = 1
+            try:
+                yield
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+            finally:
+                self._depth = 0
+                connection.autocommit = True
 
     # ------------------------------------------------------------------
     # error translation

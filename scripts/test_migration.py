@@ -46,6 +46,10 @@ SELFTEST = PROJECT_ROOT / "scripts" / "selftest.py"
 # from SHOW CREATE output; those files are schema agnostic.
 CLONED_ROUTINE_FILES = ("views.sql", "procedures.sql", "triggers.sql")
 
+# The migration runner's own bookkeeping. It is rebuilt in the copy
+# instead of copied, so that the migrations really run against the copy.
+LEDGER_TABLE = "schema_migrations"
+
 NEW_TABLES = [
     "victim_medical_records", "victim_contacts", "victim_compensation",
     "witness_statements", "witness_interviews", "witness_protection",
@@ -151,13 +155,45 @@ def refuses(cur, sql: str, params=None) -> str | None:
 # ----------------------------------------------------------------------
 # clone and snapshot
 # ----------------------------------------------------------------------
+def copyable_columns(cur, schema: str, table: str) -> list[str]:
+    """The columns of a table that a row can be written to.
+
+    Only a real generated column is left out. MySQL spells the default
+    of a ``TIMESTAMP DEFAULT CURRENT_TIMESTAMP`` column as
+    ``DEFAULT_GENERATED`` in ``EXTRA``, so matching on that word would
+    drop ``created_at`` from the copy and let it take today's date;
+    ``GENERATION_EXPRESSION`` is set only for a column the server derives.
+    Leaving those out is what lets the copy recompute them.
+    """
+    cur.execute(
+        """
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
+           AND IFNULL(GENERATION_EXPRESSION, '') = ''
+         ORDER BY ORDINAL_POSITION
+        """,
+        (schema, table),
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
 def clone_schema(cur, src: str) -> list[str]:
-    """Copy every v1 table and its rows, then recreate the routines."""
-    tables = table_names(cur, src)
+    """Copy every table and its rows, then recreate the routines.
+
+    The migration ledger is not copied. The point of the run is to apply
+    the migrations to the copy and see what happens, and a ledger that
+    says they are already applied would leave the copy without the v2
+    triggers and procedures it is meant to be checked for.
+    """
+    tables = [table for table in table_names(cur, src) if table != LEDGER_TABLE]
     for table in tables:
         cur.execute(f"SHOW CREATE TABLE {quote(src)}.{quote(table)}")
         cur.execute(cur.fetchone()[1])
-        cur.execute(f"INSERT INTO {quote(table)} SELECT * FROM {quote(src)}.{quote(table)}")
+        columns = ", ".join(quote(column) for column in copyable_columns(cur, src, table))
+        cur.execute(
+            f"INSERT INTO {quote(table)} ({columns})"
+            f" SELECT {columns} FROM {quote(src)}.{quote(table)}"
+        )
 
     # Recreating the triggers after the rows are copied matters: v1's
     # trg_cases_before_insert would otherwise renumber every cloned case.
@@ -650,13 +686,15 @@ def main() -> int:
               f"{sum(row_count(cur, dst, table) for table in tables)} rows copied")
 
         before = snapshot(cur, src, tables)
-        if "schema_migrations" in tables:
-            # The live database has already been migrated, so this run can
-            # only re-check the copy against itself. Putting v1's broken
-            # trigger back here would break the very inserts the
-            # migration is supposed to enable.
-            print("  note: the live schema is already migrated; skipping the "
-                  "pre-migration trigger simulation")
+        if LEDGER_TABLE in table_names(cur, src):
+            # The live database has already been migrated, so the copy
+            # starts out with the v2 structures in it and the migrations
+            # are applied over the top of them - which is the re-runnable
+            # DDL being proved. Putting v1's broken trigger back here
+            # would break the very inserts the migration is supposed to
+            # enable, so that simulation only runs on a v1 source.
+            print("  note: the live schema is already migrated; its ledger was "
+                  "left behind so every migration runs again on the copy")
         else:
             install_legacy_v1_trigger(cur)
 
