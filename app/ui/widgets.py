@@ -533,6 +533,8 @@ class FormPanel(ctk.CTkFrame):
         if isinstance(widget, ctk.CTkTextbox):
             widget.delete("1.0", "end")
             widget.insert("1.0", str(value))
+        elif isinstance(widget, ctk.CTkOptionMenu):
+            widget.set(str(value))
         else:
             widget.delete(0, "end")
             widget.insert(0, str(value))
